@@ -71,9 +71,9 @@ npm run build
 
 ## GitHub 仓库初始化
 
-当前 `package.json` 已写成目标仓库 `songxy/zotero-mineru-translator`。但当前 clone 仍保留模板仓库的 `origin`。
+当前仓库默认远程已切换到 `Futuresxy/Zotero-MinerU-Translator`。
 
-如果你要切到自己的 GitHub 仓库，执行：
+如果你以后要切到别的 GitHub 仓库，执行：
 
 ```bash
 git remote set-url origin https://github.com/<your-user>/<your-repo>.git
