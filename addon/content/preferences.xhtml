@@ -6,23 +6,199 @@
 >
   <label><html:h2 data-l10n-id="pref-title"></html:h2></label>
   <checkbox
-    id="zotero-prefpane-__addonRef__-enable"
-    preference="enable"
-    data-l10n-id="pref-enable"
+    id="zotero-prefpane-__addonRef__-translationEnabled"
+    preference="translationEnabled"
+    data-l10n-id="pref-translation-enabled"
   />
+
+  <separator class="thin" />
+  <label><html:h3 data-l10n-id="pref-mineru-group"></html:h3></label>
   <hbox>
     <html:label
-      for="zotero-prefpane-__addonRef__-input"
-      data-l10n-id="pref-input"
+      for="zotero-prefpane-__addonRef__-mineruBaseURL"
+      data-l10n-id="pref-mineru-base-url"
     ></html:label>
     <html:input
       type="text"
-      id="zotero-prefpane-__addonRef__-input"
-      preference="input"
+      id="zotero-prefpane-__addonRef__-mineruBaseURL"
+      preference="mineruBaseURL"
     ></html:input>
   </hbox>
-  <hbox class="virtualized-table-container" flex="1" height="300px">
-    <html:div id="__addonRef__-table-container" />
+  <hbox>
+    <html:label
+      for="zotero-prefpane-__addonRef__-mineruApiToken"
+      data-l10n-id="pref-mineru-api-token"
+    ></html:label>
+    <html:input
+      type="password"
+      id="zotero-prefpane-__addonRef__-mineruApiToken"
+      preference="mineruApiToken"
+    ></html:input>
+  </hbox>
+  <hbox>
+    <html:label
+      for="zotero-prefpane-__addonRef__-mineruModelVersion"
+      data-l10n-id="pref-mineru-model-version"
+    ></html:label>
+    <html:input
+      type="text"
+      id="zotero-prefpane-__addonRef__-mineruModelVersion"
+      preference="mineruModelVersion"
+    ></html:input>
+  </hbox>
+  <hbox>
+    <html:label
+      for="zotero-prefpane-__addonRef__-mineruLanguage"
+      data-l10n-id="pref-mineru-language"
+    ></html:label>
+    <html:input
+      type="text"
+      id="zotero-prefpane-__addonRef__-mineruLanguage"
+      preference="mineruLanguage"
+    ></html:input>
+  </hbox>
+  <hbox>
+    <html:label
+      for="zotero-prefpane-__addonRef__-mineruPageRanges"
+      data-l10n-id="pref-mineru-page-ranges"
+    ></html:label>
+    <html:input
+      type="text"
+      id="zotero-prefpane-__addonRef__-mineruPageRanges"
+      preference="mineruPageRanges"
+    ></html:input>
+  </hbox>
+  <hbox>
+    <html:label
+      for="zotero-prefpane-__addonRef__-mineruPollIntervalMs"
+      data-l10n-id="pref-mineru-poll-interval"
+    ></html:label>
+    <html:input
+      type="number"
+      id="zotero-prefpane-__addonRef__-mineruPollIntervalMs"
+      preference="mineruPollIntervalMs"
+    ></html:input>
+  </hbox>
+  <hbox>
+    <html:label
+      for="zotero-prefpane-__addonRef__-mineruTimeoutSec"
+      data-l10n-id="pref-mineru-timeout"
+    ></html:label>
+    <html:input
+      type="number"
+      id="zotero-prefpane-__addonRef__-mineruTimeoutSec"
+      preference="mineruTimeoutSec"
+    ></html:input>
+  </hbox>
+  <checkbox preference="mineruEnableTable" data-l10n-id="pref-mineru-enable-table" />
+  <checkbox preference="mineruEnableFormula" data-l10n-id="pref-mineru-enable-formula" />
+  <checkbox preference="mineruEnableOCR" data-l10n-id="pref-mineru-enable-ocr" />
+
+  <separator class="thin" />
+  <label><html:h3 data-l10n-id="pref-llm-group"></html:h3></label>
+  <hbox>
+    <html:label
+      for="zotero-prefpane-__addonRef__-translationProvider"
+      data-l10n-id="pref-provider"
+    ></html:label>
+    <html:input
+      type="text"
+      id="zotero-prefpane-__addonRef__-translationProvider"
+      preference="translationProvider"
+    ></html:input>
+  </hbox>
+  <hbox>
+    <html:label
+      for="zotero-prefpane-__addonRef__-translationBaseURL"
+      data-l10n-id="pref-base-url"
+    ></html:label>
+    <html:input
+      type="text"
+      id="zotero-prefpane-__addonRef__-translationBaseURL"
+      preference="translationBaseURL"
+    ></html:input>
+  </hbox>
+  <hbox>
+    <html:label
+      for="zotero-prefpane-__addonRef__-translationApiKey"
+      data-l10n-id="pref-api-key"
+    ></html:label>
+    <html:input
+      type="password"
+      id="zotero-prefpane-__addonRef__-translationApiKey"
+      preference="translationApiKey"
+    ></html:input>
+  </hbox>
+  <hbox>
+    <html:label
+      for="zotero-prefpane-__addonRef__-translationModel"
+      data-l10n-id="pref-model"
+    ></html:label>
+    <html:input
+      type="text"
+      id="zotero-prefpane-__addonRef__-translationModel"
+      preference="translationModel"
+    ></html:input>
+  </hbox>
+  <hbox>
+    <html:label
+      for="zotero-prefpane-__addonRef__-translationTargetLanguage"
+      data-l10n-id="pref-target-language"
+    ></html:label>
+    <html:input
+      type="text"
+      id="zotero-prefpane-__addonRef__-translationTargetLanguage"
+      preference="translationTargetLanguage"
+    ></html:input>
+  </hbox>
+  <hbox>
+    <html:label
+      for="zotero-prefpane-__addonRef__-translationTemperature"
+      data-l10n-id="pref-temperature"
+    ></html:label>
+    <html:input
+      type="text"
+      id="zotero-prefpane-__addonRef__-translationTemperature"
+      preference="translationTemperature"
+    ></html:input>
+  </hbox>
+  <hbox>
+    <html:label
+      for="zotero-prefpane-__addonRef__-translationChunkChars"
+      data-l10n-id="pref-chunk-size"
+    ></html:label>
+    <html:input
+      type="number"
+      id="zotero-prefpane-__addonRef__-translationChunkChars"
+      preference="translationChunkChars"
+    ></html:input>
+  </hbox>
+  <html:label
+    for="zotero-prefpane-__addonRef__-translationSystemPrompt"
+    data-l10n-id="pref-system-prompt"
+  ></html:label>
+  <html:textarea
+    id="zotero-prefpane-__addonRef__-translationSystemPrompt"
+    preference="translationSystemPrompt"
+    rows="5"
+  ></html:textarea>
+
+  <separator class="thin" />
+  <label><html:h3 data-l10n-id="pref-output-group"></html:h3></label>
+  <checkbox preference="skipImages" data-l10n-id="pref-skip-images" />
+  <checkbox preference="skipTables" data-l10n-id="pref-skip-tables" />
+  <checkbox preference="skipReferences" data-l10n-id="pref-skip-references" />
+  <checkbox preference="includeOriginalMarkdown" data-l10n-id="pref-include-original" />
+  <hbox>
+    <html:label
+      for="zotero-prefpane-__addonRef__-noteHeading"
+      data-l10n-id="pref-note-heading"
+    ></html:label>
+    <html:input
+      type="text"
+      id="zotero-prefpane-__addonRef__-noteHeading"
+      preference="noteHeading"
+    ></html:input>
   </hbox>
 </groupbox>
 <vbox>

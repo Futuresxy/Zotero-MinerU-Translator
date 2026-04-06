@@ -1,24 +1,24 @@
 {
-  "name": "zotero-plugin-template",
+  "name": "zotero-mineru-translator",
   "type": "module",
-  "version": "3.1.0",
-  "description": "Zotero Plugin Template",
+  "version": "0.1.0",
+  "description": "Zotero 7 plugin for converting PDF papers to Markdown with MinerU and saving LLM translations to Zotero notes.",
   "config": {
-    "addonName": "Zotero Plugin Template",
-    "addonID": "addontemplate@euclpts.com",
-    "addonRef": "addontemplate",
-    "addonInstance": "AddonTemplate",
-    "prefsPrefix": "extensions.zotero.addontemplate"
+    "addonName": "Zotero MinerU Translator",
+    "addonID": "zotero-mineru-translator@songxy.dev",
+    "addonRef": "zoterominerutranslator",
+    "addonInstance": "ZoteroMineruTranslator",
+    "prefsPrefix": "extensions.zotero.zoterominerutranslator"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/windingwind/zotero-plugin-template.git"
+    "url": "git+https://github.com/songxy/zotero-mineru-translator.git"
   },
-  "author": "windingwind",
+  "author": "songxy",
   "bugs": {
-    "url": "https://github.com/windingwind/zotero-plugin-template/issues"
+    "url": "https://github.com/songxy/zotero-mineru-translator/issues"
   },
-  "homepage": "https://github.com/windingwind/zotero-plugin-template#readme",
+  "homepage": "https://github.com/songxy/zotero-mineru-translator#readme",
   "license": "AGPL-3.0-or-later",
   "scripts": {
     "start": "zotero-plugin serve",
@@ -30,6 +30,7 @@
     "update-deps": "npm update --save"
   },
   "dependencies": {
+    "fflate": "^0.8.2",
     "zotero-plugin-toolkit": "^5.1.0-beta.13"
   },
   "devDependencies": {

@@ -1,6 +1,7 @@
 import { config } from "../package.json";
 import { ColumnOptions, DialogHelper } from "zotero-plugin-toolkit";
 import hooks from "./hooks";
+import { translateSelectedPdfs } from "./modules/workflow";
 import { createZToolkit } from "./utils/ztoolkit";
 
 class Addon {
@@ -35,7 +36,9 @@ class Addon {
       ztoolkit: createZToolkit(),
     };
     this.hooks = hooks;
-    this.api = {};
+    this.api = {
+      translateSelectedPdfs,
+    };
   }
 }
 

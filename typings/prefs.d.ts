@@ -7,8 +7,30 @@
 declare namespace _ZoteroTypes {
   interface Prefs {
     PluginPrefsMap: {
-      "enable": boolean;
-      "input": string;
+      "translationEnabled": boolean;
+      "mineruBaseURL": string;
+      "mineruApiToken": string;
+      "mineruModelVersion": string;
+      "mineruLanguage": string;
+      "mineruEnableTable": boolean;
+      "mineruEnableFormula": boolean;
+      "mineruEnableOCR": boolean;
+      "mineruPageRanges": string;
+      "mineruPollIntervalMs": number;
+      "mineruTimeoutSec": number;
+      "translationProvider": string;
+      "translationBaseURL": string;
+      "translationApiKey": string;
+      "translationModel": string;
+      "translationTargetLanguage": string;
+      "translationSystemPrompt": string;
+      "translationTemperature": string;
+      "translationChunkChars": number;
+      "skipImages": boolean;
+      "skipTables": boolean;
+      "skipReferences": boolean;
+      "noteHeading": string;
+      "includeOriginalMarkdown": boolean;
     };
   }
 }
