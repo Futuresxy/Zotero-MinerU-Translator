@@ -30,6 +30,7 @@ const MAIN_CONTENT_HEADINGS = [
 const MAX_TRANSLATION_RETRIES = 3;
 const RETRY_BASE_DELAY_MS = 1500;
 const RETRYABLE_STATUS_CODES = [408, 409, 429, 500, 502, 503, 504];
+const MAX_TRANSLATION_SPLIT_DEPTH = 2;
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
@@ -61,10 +62,10 @@ async function main() {
     args.targetLanguage || process.env.TRANSLATION_TARGET_LANGUAGE || "简体中文";
   const chunkChars = Math.max(
     2000,
-    Number(args.chunkChars || process.env.TRANSLATION_CHUNK_CHARS || 9000),
+    Number(args.chunkChars || process.env.TRANSLATION_CHUNK_CHARS || 7000),
   );
   const concurrency = clampConcurrency(
-    Number(args.concurrency || process.env.TRANSLATION_CONCURRENCY || 3),
+    Number(args.concurrency || process.env.TRANSLATION_CONCURRENCY || 2),
   );
   const outputDir = path.resolve(
     args.outputDir || process.env.TRANSLATION_OUTPUT_DIR || "batch-output",
@@ -221,8 +222,8 @@ Options:
   --api-key <key>                 Translation API key
   --model <name>                  Model name
   --target-language <v>           Target language, default: 简体中文
-  --chunk-chars <n>               Chunk size, default: 9000
-  --concurrency <n>               Parallel translation requests, default: 3
+  --chunk-chars <n>               Chunk size, default: 7000
+  --concurrency <n>               Parallel translation requests, default: 2
   --output-dir <dir>              Output directory, default: batch-output
   --pages <range>                 pdftotext page range, e.g. 1-5
   --system-prompt <text>          Custom system prompt
@@ -664,6 +665,10 @@ function restorePreservedMarkdown(markdown, preservedBlocks) {
 }
 
 async function translateChunk(params) {
+  return await translateChunkInternal(params, 0);
+}
+
+async function translateChunkInternal(params, splitDepth) {
   const endpoint = resolveTranslationEndpoint(params.baseURL);
   const body =
     endpoint.apiStyle === "responses"
@@ -678,62 +683,98 @@ async function translateChunk(params) {
           messages: createMessages(params),
         };
 
-  const response = await retryTranslationRequest(async () => {
-    const response = await fetch(endpoint.url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${params.apiKey}`,
-      },
-      body: JSON.stringify(body),
+  try {
+    const response = await retryTranslationRequest(async () => {
+      const response = await fetch(endpoint.url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${params.apiKey}`,
+        },
+        body: JSON.stringify(body),
+      });
+
+      const raw = await response.text();
+      if (!response.ok) {
+        throw new Error(
+          `Translation request failed (${response.status}): ${raw.slice(0, 500)}`,
+        );
+      }
+
+      const parsed = JSON.parse(raw);
+      const text =
+        endpoint.apiStyle === "responses"
+          ? extractResponsesText(parsed)
+          : extractChatText(parsed);
+
+      if (!text) {
+        throw new Error(
+          `Translation API returned empty content: ${raw.slice(0, 500)}`,
+        );
+      }
+
+      ensureTranslationLooksApplied(params.chunk, text, params.targetLanguage);
+
+      return text;
     });
-
-    const raw = await response.text();
-    if (!response.ok) {
-      throw new Error(
-        `Translation request failed (${response.status}): ${raw.slice(0, 500)}`,
-      );
+    return response;
+  } catch (error) {
+    if (
+      !shouldRetryBySplitting(error) ||
+      splitDepth >= MAX_TRANSLATION_SPLIT_DEPTH
+    ) {
+      throw error;
     }
 
-    const parsed = JSON.parse(raw);
-    const text =
-      endpoint.apiStyle === "responses"
-        ? extractResponsesText(parsed)
-        : extractChatText(parsed);
-
-    if (!text) {
-      throw new Error(
-        `Translation API returned empty content: ${raw.slice(0, 500)}`,
-      );
+    const parts = splitChunkForRetry(params.chunk);
+    if (!parts) {
+      throw error;
     }
 
-    return text;
-  });
-  return response;
+    const translatedParts = [];
+    for (const part of parts) {
+      translatedParts.push(
+        await translateChunkInternal(
+          {
+            ...params,
+            chunk: part,
+          },
+          splitDepth + 1,
+        ),
+      );
+    }
+    return translatedParts.join("\n\n");
+  }
 }
 
 function createMessages(params) {
-  return [
-    {
+  const messages = [];
+  const systemPrompt = String(params.systemPrompt || "").trim();
+
+  if (systemPrompt) {
+    messages.push({
       role: "system",
-      content: params.systemPrompt,
-    },
-    {
-      role: "user",
-      content: [
-        `请将下面的 Markdown 内容翻译成${params.targetLanguage}。`,
-        "要求：",
-        "1. 直接返回译文 Markdown。",
-        "2. 保留标题层级、列表、公式和段落结构。",
-        "3. 不要补充解释。",
-        "4. 保留缩写、术语和参考标号。",
-        `5. 不要修改形如 ${PRESERVE_TOKEN_PREFIX}0001${PRESERVE_TOKEN_SUFFIX} 的占位符。`,
-        `6. 这是第 ${params.index + 1} / ${params.total} 个分段。`,
-        "",
-        params.chunk,
-      ].join("\n"),
-    },
-  ];
+      content: systemPrompt,
+    });
+  }
+
+  messages.push({
+    role: "user",
+    content: [
+      `请将下面的 Markdown 内容翻译成${params.targetLanguage}。`,
+      "要求：",
+      "1. 直接返回译文 Markdown。",
+      "2. 保留标题层级、列表、公式和段落结构。",
+      "3. 不要补充解释。",
+      "4. 保留缩写、术语和参考标号。",
+      `5. 不要修改形如 ${PRESERVE_TOKEN_PREFIX}0001${PRESERVE_TOKEN_SUFFIX} 的占位符。`,
+      `6. 这是第 ${params.index + 1} / ${params.total} 个分段。`,
+      "",
+      params.chunk,
+    ].join("\n"),
+  });
+
+  return messages;
 }
 
 function resolveTranslationEndpoint(baseURL) {
@@ -783,7 +824,7 @@ function parseBoolean(value, defaultValue) {
 
 function clampConcurrency(value) {
   if (!Number.isFinite(value)) {
-    return 3;
+    return 2;
   }
   return Math.max(1, Math.min(8, Math.floor(value)));
 }
@@ -820,6 +861,81 @@ function isRetryableTranslationError(error) {
   return RETRYABLE_STATUS_CODES.some((status) =>
     message.includes(`(${status})`),
   );
+}
+
+function shouldRetryBySplitting(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("mostly unchanged from the source text");
+}
+
+function splitChunkForRetry(chunk) {
+  const parts = chunk
+    .split(/\n\s*\n/g)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length < 2) {
+    return null;
+  }
+
+  const midpoint = Math.floor(parts.length / 2);
+  const left = parts.slice(0, midpoint).join("\n\n").trim();
+  const right = parts.slice(midpoint).join("\n\n").trim();
+  if (!left || !right) {
+    return null;
+  }
+  return [left, right];
+}
+
+function ensureTranslationLooksApplied(source, translated, targetLanguage) {
+  const normalizedSource = normalizeComparableText(source);
+  const normalizedTranslated = normalizeComparableText(translated);
+  if (!normalizedSource || !normalizedTranslated) {
+    return;
+  }
+
+  const similarity = overlapRatio(normalizedSource, normalizedTranslated);
+  const expectsChinese = /中文|汉语|汉字|chinese/i.test(targetLanguage);
+  const hasEnoughChinese = countChineseChars(translated) >= 20;
+
+  if (
+    expectsChinese &&
+    normalizedSource.length > 300 &&
+    similarity > 0.88 &&
+    !hasEnoughChinese
+  ) {
+    throw new Error(
+      "Translation response appears to be mostly unchanged from the source text.",
+    );
+  }
+}
+
+function normalizeComparableText(value) {
+  return value
+    .replace(/\[\[\[ZPT_KEEP_BLOCK_[0-9]{4}\]\]\]/g, " ")
+    .replace(/[`*_#>\-\[\]\(\)\|]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function overlapRatio(left, right) {
+  const minLength = Math.min(left.length, right.length);
+  if (minLength === 0) {
+    return 0;
+  }
+  const sampleLength = Math.min(minLength, 1200);
+  let same = 0;
+  for (let index = 0; index < sampleLength; index++) {
+    if (left[index] === right[index]) {
+      same += 1;
+    }
+  }
+  return same / sampleLength;
+}
+
+function countChineseChars(value) {
+  const matches = value.match(/[\u3400-\u9fff]/g);
+  return matches ? matches.length : 0;
 }
 
 async function mapWithConcurrency(items, concurrency, worker) {

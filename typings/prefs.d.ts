@@ -22,6 +22,8 @@ declare namespace _ZoteroTypes {
       "translationBaseURL": string;
       "translationApiKey": string;
       "translationModel": string;
+      "translationProfileName": string;
+      "translationProfiles": string;
       "translationTargetLanguage": string;
       "translationSystemPrompt": string;
       "translationTemperature": string;

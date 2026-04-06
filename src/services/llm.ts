@@ -43,6 +43,7 @@ export interface TranslationCallbacks {
 const MAX_TRANSLATION_RETRIES = 3;
 const RETRY_BASE_DELAY_MS = 1500;
 const RETRYABLE_STATUS_CODES = [408, 409, 429, 500, 502, 503, 504];
+const MAX_TRANSLATION_SPLIT_DEPTH = 2;
 
 export async function translateMarkdownChunks(
   chunks: string[],
@@ -125,11 +126,52 @@ async function translateSingleChunk(
   index: number,
   total: number,
   settings: TranslationSettings,
+  splitDepth = 0,
 ) {
   const endpoint = resolveTranslationEndpoint(settings.baseURL);
   if (endpoint.apiStyle === "responses") {
+    try {
+      const response = await retryTranslationRequest(async () => {
+        return await fetchJSON<ResponsesAPIResponse>(endpoint.url, {
+          method: "POST",
+          timeoutMs: 120000,
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${settings.apiKey}`,
+          },
+          body: JSON.stringify({
+            model: settings.model,
+            temperature: settings.temperature,
+            input: createMessages(chunk, index, total, settings),
+          }),
+        });
+      });
+
+      if (response.error?.message) {
+        throw new Error(`Translation API error: ${response.error.message}`);
+      }
+
+      const text = extractResponsesText(response);
+      if (text) {
+        ensureTranslationLooksApplied(chunk, text, settings.targetLanguage);
+        return text;
+      }
+      throw new Error("Translation API returned empty content.");
+    } catch (error) {
+      return await retryBySplittingChunk(
+        error,
+        chunk,
+        index,
+        total,
+        settings,
+        splitDepth,
+      );
+    }
+  }
+
+  try {
     const response = await retryTranslationRequest(async () => {
-      return await fetchJSON<ResponsesAPIResponse>(endpoint.url, {
+      return await fetchJSON<ChatCompletionResponse>(endpoint.url, {
         method: "POST",
         timeoutMs: 120000,
         headers: {
@@ -139,26 +181,7 @@ async function translateSingleChunk(
         body: JSON.stringify({
           model: settings.model,
           temperature: settings.temperature,
-          input: [
-            {
-              role: "system",
-              content: settings.systemPrompt,
-            },
-            {
-              role: "user",
-              content: [
-                `请将下面的 Markdown 内容翻译成${settings.targetLanguage}。`,
-                "要求：",
-                "1. 保留 Markdown 结构和标题层级。",
-                "2. 不要补充说明、总结或注释。",
-                "3. 保留公式、变量、缩写、参考标号和专业术语。",
-                "4. 不要修改形如 [[[ZPT_KEEP_BLOCK_0001]]] 的占位符。",
-                `5. 这是第 ${index + 1} / ${total} 个分段，请直接返回译文 Markdown。`,
-                "",
-                chunk,
-              ].join("\n"),
-            },
-          ],
+          messages: createMessages(chunk, index, total, settings),
         }),
       });
     });
@@ -167,68 +190,34 @@ async function translateSingleChunk(
       throw new Error(`Translation API error: ${response.error.message}`);
     }
 
-    const text = extractResponsesText(response);
-    if (text) {
-      return text;
+    const content = response.choices?.[0]?.message?.content;
+    if (typeof content === "string" && content.trim()) {
+      ensureTranslationLooksApplied(chunk, content.trim(), settings.targetLanguage);
+      return content.trim();
     }
+
+    if (Array.isArray(content)) {
+      const text = content
+        .map((part) => part.text || "")
+        .join("")
+        .trim();
+      if (text) {
+        ensureTranslationLooksApplied(chunk, text, settings.targetLanguage);
+        return text;
+      }
+    }
+
     throw new Error("Translation API returned empty content.");
+  } catch (error) {
+    return await retryBySplittingChunk(
+      error,
+      chunk,
+      index,
+      total,
+      settings,
+      splitDepth,
+    );
   }
-
-  const response = await retryTranslationRequest(async () => {
-    return await fetchJSON<ChatCompletionResponse>(endpoint.url, {
-      method: "POST",
-      timeoutMs: 120000,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${settings.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: settings.model,
-        temperature: settings.temperature,
-        input: [
-          {
-            role: "system",
-            content: settings.systemPrompt,
-          },
-          {
-            role: "user",
-            content: [
-              `请将下面的 Markdown 内容翻译成${settings.targetLanguage}。`,
-              "要求：",
-              "1. 保留 Markdown 结构和标题层级。",
-              "2. 不要补充说明、总结或注释。",
-              "3. 保留公式、变量、缩写、参考标号和专业术语。",
-              "4. 不要修改形如 [[[ZPT_KEEP_BLOCK_0001]]] 的占位符。",
-              `5. 这是第 ${index + 1} / ${total} 个分段，请直接返回译文 Markdown。`,
-              "",
-              chunk,
-            ].join("\n"),
-          },
-        ],
-      }),
-    });
-  });
-
-  if (response.error?.message) {
-    throw new Error(`Translation API error: ${response.error.message}`);
-  }
-
-  const content = response.choices?.[0]?.message?.content;
-  if (typeof content === "string" && content.trim()) {
-    return content.trim();
-  }
-
-  if (Array.isArray(content)) {
-    const text = content
-      .map((part) => part.text || "")
-      .join("")
-      .trim();
-    if (text) {
-      return text;
-    }
-  }
-
-  throw new Error("Translation API returned empty content.");
 }
 
 function resolveTranslationEndpoint(baseURL: string) {
@@ -268,6 +257,40 @@ function extractResponsesText(response: ResponsesAPIResponse) {
     .trim();
 }
 
+function createMessages(
+  chunk: string,
+  index: number,
+  total: number,
+  settings: TranslationSettings,
+) {
+  const messages: Array<{ role: "system" | "user"; content: string }> = [];
+  const systemPrompt = settings.systemPrompt.trim();
+
+  if (systemPrompt) {
+    messages.push({
+      role: "system",
+      content: systemPrompt,
+    });
+  }
+
+  messages.push({
+    role: "user",
+    content: [
+      `请将下面的 Markdown 内容翻译成${settings.targetLanguage}。`,
+      "要求：",
+      "1. 保留 Markdown 结构和标题层级。",
+      "2. 不要补充说明、总结或注释。",
+      "3. 保留公式、变量、缩写、参考标号和专业术语。",
+      "4. 不要修改形如 [[[ZPT_KEEP_BLOCK_0001]]] 的占位符。",
+      `5. 这是第 ${index + 1} / ${total} 个分段，请直接返回译文 Markdown。`,
+      "",
+      chunk,
+    ].join("\n"),
+  });
+
+  return messages;
+}
+
 async function retryTranslationRequest<T>(requestFn: () => Promise<T>) {
   let lastError: unknown;
 
@@ -304,4 +327,117 @@ function isRetryableTranslationError(error: unknown) {
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function retryBySplittingChunk(
+  error: unknown,
+  chunk: string,
+  index: number,
+  total: number,
+  settings: TranslationSettings,
+  splitDepth: number,
+) {
+  if (
+    !shouldRetryBySplitting(error) ||
+    splitDepth >= MAX_TRANSLATION_SPLIT_DEPTH
+  ) {
+    throw error;
+  }
+
+  const parts = splitChunkForRetry(chunk);
+  if (!parts) {
+    throw error;
+  }
+
+  const translatedParts: string[] = [];
+  for (const part of parts) {
+    translatedParts.push(
+      await translateSingleChunk(
+        part,
+        index,
+        total,
+        settings,
+        splitDepth + 1,
+      ),
+    );
+  }
+  return translatedParts.join("\n\n");
+}
+
+function shouldRetryBySplitting(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("mostly unchanged from the source text");
+}
+
+function splitChunkForRetry(chunk: string) {
+  const parts = chunk
+    .split(/\n\s*\n/g)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length < 2) {
+    return null;
+  }
+
+  const midpoint = Math.floor(parts.length / 2);
+  const left = parts.slice(0, midpoint).join("\n\n").trim();
+  const right = parts.slice(midpoint).join("\n\n").trim();
+  if (!left || !right) {
+    return null;
+  }
+  return [left, right];
+}
+
+function ensureTranslationLooksApplied(
+  source: string,
+  translated: string,
+  targetLanguage: string,
+) {
+  const normalizedSource = normalizeComparableText(source);
+  const normalizedTranslated = normalizeComparableText(translated);
+  if (!normalizedSource || !normalizedTranslated) {
+    return;
+  }
+
+  const similarity = overlapRatio(normalizedSource, normalizedTranslated);
+  const expectsChinese = /中文|汉语|汉字|chinese/i.test(targetLanguage);
+  const hasEnoughChinese = countChineseChars(translated) >= 20;
+
+  if (
+    expectsChinese &&
+    normalizedSource.length > 300 &&
+    similarity > 0.88 &&
+    !hasEnoughChinese
+  ) {
+    throw new Error(
+      "Translation response appears to be mostly unchanged from the source text.",
+    );
+  }
+}
+
+function normalizeComparableText(value: string) {
+  return value.replace(/\[\[\[ZPT_KEEP_BLOCK_[0-9]{4}\]\]\]/g, " ")
+    .replace(/[`*_#>\-\[\]\(\)\|]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function overlapRatio(left: string, right: string) {
+  const minLength = Math.min(left.length, right.length);
+  if (minLength === 0) {
+    return 0;
+  }
+  const sampleLength = Math.min(minLength, 1200);
+  let same = 0;
+  for (let index = 0; index < sampleLength; index++) {
+    if (left[index] === right[index]) {
+      same += 1;
+    }
+  }
+  return same / sampleLength;
+}
+
+function countChineseChars(value: string) {
+  const matches = value.match(/[\u3400-\u9fff]/g);
+  return matches ? matches.length : 0;
 }

@@ -101,11 +101,9 @@
       for="zotero-prefpane-__addonRef__-translationProvider"
       data-l10n-id="pref-provider"
     ></html:label>
-    <html:input
-      type="text"
+    <html:select
       id="zotero-prefpane-__addonRef__-translationProvider"
-      preference="translationProvider"
-    ></html:input>
+    ></html:select>
   </hbox>
   <hbox>
     <html:label
@@ -139,6 +137,41 @@
       id="zotero-prefpane-__addonRef__-translationModel"
       preference="translationModel"
     ></html:input>
+  </hbox>
+  <hbox>
+    <html:label
+      for="zotero-prefpane-__addonRef__-translationProfileName"
+      data-l10n-id="pref-profile-name"
+    ></html:label>
+    <html:input
+      type="text"
+      id="zotero-prefpane-__addonRef__-translationProfileName"
+      preference="translationProfileName"
+    ></html:input>
+  </hbox>
+  <hbox>
+    <html:label
+      for="zotero-prefpane-__addonRef__-translationSavedProfiles"
+      data-l10n-id="pref-saved-profiles"
+    ></html:label>
+    <html:select
+      id="zotero-prefpane-__addonRef__-translationSavedProfiles"
+    ></html:select>
+  </hbox>
+  <hbox>
+    <html:spacer flex="1"></html:spacer>
+    <html:button
+      id="zotero-prefpane-__addonRef__-translationProfileSave"
+      data-l10n-id="pref-profile-save"
+    ></html:button>
+    <html:button
+      id="zotero-prefpane-__addonRef__-translationProfileLoad"
+      data-l10n-id="pref-profile-load"
+    ></html:button>
+    <html:button
+      id="zotero-prefpane-__addonRef__-translationProfileDelete"
+      data-l10n-id="pref-profile-delete"
+    ></html:button>
   </hbox>
   <hbox>
     <html:label

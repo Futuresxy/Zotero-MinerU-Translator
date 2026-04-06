@@ -1,6 +1,12 @@
 import { getPref } from "../utils/prefs";
 
-export type TranslationProvider = "openai" | "deepseek" | "doubao" | "custom";
+export type TranslationProvider =
+  | "openai"
+  | "deepseek"
+  | "doubao"
+  | "glm"
+  | "gemini"
+  | "custom";
 export type MinerUModelVersion = "pipeline" | "vlm" | "MinerU-HTML";
 
 export interface MinerUSettings {
@@ -43,9 +49,15 @@ export interface WorkflowSettings {
 const PROVIDER_BASE_URLS: Record<TranslationProvider, string> = {
   openai: "https://api.openai.com/v1",
   deepseek: "https://api.deepseek.com/v1",
-  doubao: "https://ark.cn-beijing.volces.com/api/v3",
+  doubao: "https://ark.cn-beijing.volces.com/api/v3/responses",
+  glm: "https://open.bigmodel.cn/api/paas/v4",
+  gemini: "https://generativelanguage.googleapis.com/v1beta/openai",
   custom: "",
 };
+
+export function getProviderBaseURL(provider: TranslationProvider) {
+  return PROVIDER_BASE_URLS[provider];
+}
 
 export function getWorkflowSettings(): WorkflowSettings {
   const provider = normalizeProvider(getPref("translationProvider"));
@@ -81,10 +93,10 @@ export function getWorkflowSettings(): WorkflowSettings {
       temperature: clampTemperature(getPref("translationTemperature")),
       chunkChars: Math.max(
         2000,
-        Number(getPref("translationChunkChars")) || 9000,
+        Number(getPref("translationChunkChars")) || 7000,
       ),
       concurrency: clampConcurrency(
-        Number(getPref("translationConcurrency")) || 3,
+        Number(getPref("translationConcurrency")) || 2,
       ),
       skipImages: getPref("skipImages"),
       skipTables: getPref("skipTables"),
@@ -100,6 +112,12 @@ function normalizeProvider(value: string): TranslationProvider {
   const normalized = value.trim().toLowerCase();
   if (normalized === "openai") return "openai";
   if (normalized === "deepseek") return "deepseek";
+  if (normalized === "glm" || normalized === "zhipu" || normalized === "bigmodel") {
+    return "glm";
+  }
+  if (normalized === "gemini" || normalized === "google") {
+    return "gemini";
+  }
   if (
     normalized === "doubao" ||
     normalized === "ark" ||
@@ -128,7 +146,7 @@ function clampTemperature(value: string) {
 
 function clampConcurrency(value: number) {
   if (!Number.isFinite(value)) {
-    return 3;
+    return 2;
   }
   return Math.max(1, Math.min(8, Math.floor(value)));
 }
