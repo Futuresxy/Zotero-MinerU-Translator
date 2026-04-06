@@ -49,13 +49,31 @@ export async function putBinary(
   data: Uint8Array,
   timeoutMs = 120000,
 ) {
-  const xhr = await request(url, {
-    method: "PUT",
-    body: data,
-    timeoutMs,
-  });
+  let fetchError: unknown;
 
-  ensureSuccess(xhr, getResponseText(xhr), "Upload failed");
+  try {
+    await putBinaryWithFetch(url, data, timeoutMs);
+    return;
+  } catch (error) {
+    fetchError = error;
+  }
+
+  try {
+    const xhr = await request(url, {
+      method: "PUT",
+      body: data,
+      timeoutMs,
+    });
+
+    ensureSuccess(xhr, getResponseText(xhr), "Upload failed");
+  } catch (error) {
+    const parts = [];
+    if (fetchError) {
+      parts.push(`fetch: ${stringifyNetworkError(fetchError)}`);
+    }
+    parts.push(`Zotero.HTTP: ${stringifyNetworkError(error)}`);
+    throw new Error(parts.join("; "));
+  }
 }
 
 async function request(
@@ -76,6 +94,45 @@ async function request(
     const message =
       error instanceof Error ? error.message : "Unknown network error.";
     throw new Error(`Network request failed for ${url}: ${message}`);
+  }
+}
+
+async function putBinaryWithFetch(
+  url: string,
+  body: Uint8Array,
+  timeoutMs: number,
+) {
+  if (typeof fetch !== "function") {
+    throw new Error("fetch is not available in this Zotero runtime.");
+  }
+
+  const controller =
+    typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer =
+    controller && timeoutMs > 0
+      ? setTimeout(() => controller.abort(), timeoutMs)
+      : null;
+
+  try {
+    const response = await fetch(url, {
+      method: "PUT",
+      body,
+      signal: controller?.signal,
+    });
+    const text = await response.text().catch(() => "");
+    if (response.ok) {
+      return;
+    }
+    throw new Error(`Upload failed (${response.status}): ${text.slice(0, 240)}`);
+  } catch (error) {
+    if ((error as { name?: string })?.name === "AbortError") {
+      throw new Error(`Upload timed out after ${timeoutMs} ms.`);
+    }
+    throw error;
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
   }
 }
 
@@ -105,8 +162,12 @@ function ensureSuccess(
 }
 
 function getResponseText(xhr: XMLHttpRequest) {
-  if (typeof xhr.responseText === "string" && xhr.responseText) {
-    return xhr.responseText;
+  try {
+    if (typeof xhr.responseText === "string" && xhr.responseText) {
+      return xhr.responseText;
+    }
+  } catch {
+    // responseText is inaccessible for non-text responseType values in Firefox.
   }
 
   if (typeof xhr.response === "string") {
@@ -122,4 +183,8 @@ function getResponseText(xhr: XMLHttpRequest) {
   }
 
   return "";
+}
+
+function stringifyNetworkError(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }

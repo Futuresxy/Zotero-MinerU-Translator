@@ -26,8 +26,10 @@ declare namespace _ZoteroTypes {
       "translationSystemPrompt": string;
       "translationTemperature": string;
       "translationChunkChars": number;
+      "translationConcurrency": number;
       "skipImages": boolean;
       "skipTables": boolean;
+      "skipFrontMatter": boolean;
       "skipReferences": boolean;
       "noteHeading": string;
       "includeOriginalMarkdown": boolean;

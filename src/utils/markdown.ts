@@ -12,11 +12,23 @@ interface PreparedMarkdown {
   preservedBlocks: PreservedBlock[];
 }
 
-const REFERENCE_HEADINGS = [
-  "references",
-  "bibliography",
-  "参考文献",
-  "references and notes",
+const TAIL_PRESERVE_HEADING_PATTERNS = [
+  /^references$/i,
+  /^bibliography$/i,
+  /^references and notes$/i,
+  /^appendix$/i,
+  /^appendices$/i,
+  /^supplement(?:ary)?(?: materials?)?$/i,
+  /^参考文献$/,
+  /^附录$/,
+];
+const MAIN_CONTENT_HEADINGS = [
+  /^abstract$/i,
+  /^摘要$/i,
+  /^(?:\d+(?:\.\d+)*|[ivxlcdm]+)[.)]?\s+introduction$/i,
+  /^(?:\d+(?:\.\d+)*|[ivxlcdm]+)[.)]?\s+(?:background|preliminaries|preliminary|related work|method|methods|approach|experiments?|evaluation|results?|discussion|conclusion|appendix)$/i,
+  /^(?:introduction|background|preliminaries|preliminary|related work|method|methods|approach|experiments?|evaluation|results?|discussion|conclusion|appendix)$/i,
+  /^(?:引言|方法|实验|结果|讨论|结论|附录)$/i,
 ];
 
 const PRESERVE_TOKEN_PREFIX = "[[[ZPT_KEEP_BLOCK_";
@@ -27,7 +39,10 @@ export function prepareMarkdownForTranslation(
   settings: TranslationSettings,
 ): PreparedMarkdown {
   const extracted = extractBlocks(markdown, settings);
-  const translationMarkdown = extracted.blocks.join("\n\n").trim();
+  const translationBlocks = settings.skipFrontMatter
+    ? stripLeadingFrontMatter(extracted.blocks)
+    : extracted.blocks;
+  const translationMarkdown = translationBlocks.join("\n\n").trim();
   const cleanedMarkdown = restorePreservedMarkdown(
     translationMarkdown,
     extracted.preservedBlocks,
@@ -36,8 +51,8 @@ export function prepareMarkdownForTranslation(
   return {
     cleanedMarkdown,
     translationMarkdown,
-    chunks: extracted.translatableBlockCount
-      ? chunkBlocks(extracted.blocks, settings.chunkChars)
+    chunks: countTranslatableBlocks(translationBlocks)
+      ? chunkBlocks(translationBlocks, settings.chunkChars)
       : [],
     preservedBlocks: extracted.preservedBlocks,
   };
@@ -64,6 +79,7 @@ function extractBlocks(markdown: string, settings: TranslationSettings) {
   let translatableBlockCount = 0;
   let inFence = false;
   let htmlPreserveTag: "table" | "figure" | null = null;
+  let preserveTail = false;
 
   const flushCurrent = () => {
     const block = current.join("\n").trim();
@@ -91,6 +107,12 @@ function extractBlocks(markdown: string, settings: TranslationSettings) {
   for (const rawLine of lines) {
     const line = rawLine.trimEnd();
 
+    if (preserveTail) {
+      flushCurrent();
+      preservedCurrent.push(line);
+      continue;
+    }
+
     if (htmlPreserveTag) {
       flushCurrent();
       preservedCurrent.push(line);
@@ -116,10 +138,12 @@ function extractBlocks(markdown: string, settings: TranslationSettings) {
       continue;
     }
 
-    if (settings.skipReferences && isReferenceHeading(line)) {
+    if (settings.skipReferences && shouldPreserveTailFromHeading(line)) {
       flushCurrent();
       flushPreserved();
-      break;
+      preservedCurrent.push(line);
+      preserveTail = true;
+      continue;
     }
 
     const openedTag = getOpenedHtmlPreserveTag(line, settings);
@@ -190,9 +214,9 @@ function getOpenedHtmlPreserveTag(
   return null;
 }
 
-function isReferenceHeading(line: string) {
-  const heading = line.replace(/^#+\s*/, "").trim().toLowerCase();
-  return REFERENCE_HEADINGS.includes(heading);
+function shouldPreserveTailFromHeading(line: string) {
+  const heading = line.replace(/^#+\s*/, "").trim();
+  return TAIL_PRESERVE_HEADING_PATTERNS.some((pattern) => pattern.test(heading));
 }
 
 function chunkBlocks(blocks: string[], maxChars: number) {
@@ -219,4 +243,40 @@ function chunkBlocks(blocks: string[], maxChars: number) {
   }
 
   return chunks;
+}
+
+function stripLeadingFrontMatter(blocks: string[]) {
+  const firstContentIndex = blocks.findIndex((block) => isMainContentStart(block));
+  if (firstContentIndex <= 0) {
+    return blocks;
+  }
+  return blocks.slice(firstContentIndex);
+}
+
+function isMainContentStart(block: string) {
+  if (!block || isPreservedToken(block)) {
+    return false;
+  }
+
+  const firstLine = block
+    .split("\n")
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (!firstLine) {
+    return false;
+  }
+
+  const normalized = firstLine.replace(/^#+\s*/, "").trim();
+  return MAIN_CONTENT_HEADINGS.some((pattern) => pattern.test(normalized));
+}
+
+function countTranslatableBlocks(blocks: string[]) {
+  return blocks.filter((block) => !isPreservedToken(block)).length;
+}
+
+function isPreservedToken(block: string) {
+  return (
+    block.startsWith(PRESERVE_TOKEN_PREFIX) &&
+    block.endsWith(PRESERVE_TOKEN_SUFFIX)
+  );
 }

@@ -9,12 +9,27 @@ const DEFAULT_SYSTEM_PROMPT =
   "你是一名学术论文翻译助手。请准确翻译为目标语言，保留 Markdown 结构、标题层级、列表、公式、缩写和专业术语；不要添加额外解释。";
 const PRESERVE_TOKEN_PREFIX = "[[[ZPT_KEEP_BLOCK_";
 const PRESERVE_TOKEN_SUFFIX = "]]]";
-const REFERENCE_HEADINGS = [
-  "references",
-  "bibliography",
-  "参考文献",
-  "references and notes",
+const TAIL_PRESERVE_HEADING_PATTERNS = [
+  /^references$/i,
+  /^bibliography$/i,
+  /^references and notes$/i,
+  /^appendix$/i,
+  /^appendices$/i,
+  /^supplement(?:ary)?(?: materials?)?$/i,
+  /^参考文献$/,
+  /^附录$/,
 ];
+const MAIN_CONTENT_HEADINGS = [
+  /^abstract$/i,
+  /^摘要$/i,
+  /^(?:\d+(?:\.\d+)*|[ivxlcdm]+)[.)]?\s+introduction$/i,
+  /^(?:\d+(?:\.\d+)*|[ivxlcdm]+)[.)]?\s+(?:background|preliminaries|preliminary|related work|method|methods|approach|experiments?|evaluation|results?|discussion|conclusion|appendix)$/i,
+  /^(?:introduction|background|preliminaries|preliminary|related work|method|methods|approach|experiments?|evaluation|results?|discussion|conclusion|appendix)$/i,
+  /^(?:引言|方法|实验|结果|讨论|结论|附录)$/i,
+];
+const MAX_TRANSLATION_RETRIES = 3;
+const RETRY_BASE_DELAY_MS = 1500;
+const RETRYABLE_STATUS_CODES = [408, 409, 429, 500, 502, 503, 504];
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
@@ -45,8 +60,11 @@ async function main() {
   const targetLanguage =
     args.targetLanguage || process.env.TRANSLATION_TARGET_LANGUAGE || "简体中文";
   const chunkChars = Math.max(
-    500,
-    Number(args.chunkChars || process.env.TRANSLATION_CHUNK_CHARS || 2800),
+    2000,
+    Number(args.chunkChars || process.env.TRANSLATION_CHUNK_CHARS || 9000),
+  );
+  const concurrency = clampConcurrency(
+    Number(args.concurrency || process.env.TRANSLATION_CONCURRENCY || 3),
   );
   const outputDir = path.resolve(
     args.outputDir || process.env.TRANSLATION_OUTPUT_DIR || "batch-output",
@@ -67,7 +85,8 @@ async function main() {
   ).replace(/\/+$/, "");
   const skipImages = parseBoolean(args.skipImages, true);
   const skipTables = parseBoolean(args.skipTables, true);
-  const skipReferences = parseBoolean(args.skipReferences, false);
+  const skipFrontMatter = parseBoolean(args.skipFrontMatter, true);
+  const skipReferences = parseBoolean(args.skipReferences, true);
 
   const files = await collectPdfFiles(path.resolve(inputPath));
   if (!files.length) {
@@ -77,64 +96,90 @@ async function main() {
   await fs.mkdir(outputDir, { recursive: true });
 
   for (const filePath of files) {
-    console.log(`\n==> Processing ${filePath}`);
+    const baseName = path.basename(filePath, path.extname(filePath));
+    const safeBaseName = sanitizeFileName(baseName);
+    const markdownPath = path.join(outputDir, `${safeBaseName}.translated.md`);
+    const partialPath = path.join(outputDir, `${safeBaseName}.partial.md`);
 
-    const extractedMarkdown =
-      extractor === "mineru"
-        ? await extractMarkdownWithMinerU({
-            filePath,
-            apiToken: mineruApiToken,
-            baseURL: mineruBaseURL,
-          })
-        : await extractPdfText(filePath, args.pages);
+    try {
+      console.log(`\n==> Processing ${filePath}`);
 
-    if (!extractedMarkdown.trim()) {
-      throw new Error(`No text extracted from ${filePath}`);
-    }
+      const extractedMarkdown =
+        extractor === "mineru"
+          ? await extractMarkdownWithMinerU({
+              filePath,
+              apiToken: mineruApiToken,
+              baseURL: mineruBaseURL,
+            })
+          : await extractPdfText(filePath, args.pages);
 
-    if (extractor !== "mineru") {
-      console.log(
-        "   using pdftotext fallback; MinerU image/table markdown cannot be preserved in this mode",
-      );
-    }
+      if (!extractedMarkdown.trim()) {
+        throw new Error(`No text extracted from ${filePath}`);
+      }
 
-    const prepared = prepareMarkdownForTranslation(extractedMarkdown, {
-      chunkChars,
-      skipImages,
-      skipTables,
-      skipReferences,
-    });
+      if (extractor !== "mineru") {
+        console.log(
+          "   using pdftotext fallback; MinerU image/table markdown cannot be preserved in this mode",
+        );
+      }
 
-    const translatedChunks = [];
-    for (let index = 0; index < prepared.chunks.length; index++) {
-      console.log(`   translating chunk ${index + 1}/${prepared.chunks.length}`);
-      translatedChunks.push(
-        await translateChunk({
+      const prepared = prepareMarkdownForTranslation(extractedMarkdown, {
+        chunkChars,
+        skipImages,
+        skipTables,
+        skipFrontMatter,
+        skipReferences,
+      });
+      const translatedChunks = new Array(prepared.chunks.length).fill("");
+      let partialWriteQueue = Promise.resolve();
+
+      if (prepared.chunks.length) {
+        console.log(
+          `   translating ${prepared.chunks.length} chunks with concurrency ${concurrency}`,
+        );
+      }
+
+      await mapWithConcurrency(prepared.chunks, concurrency, async (chunk, index, total) => {
+        console.log(`   translating chunk ${index + 1}/${total}`);
+        const translated = await translateChunk({
           apiKey,
           baseURL,
           model,
           systemPrompt,
           targetLanguage,
-          chunk: prepared.chunks[index],
+          chunk,
           index,
-          total: prepared.chunks.length,
-        }),
+          total,
+        });
+        translatedChunks[index] = translated;
+        partialWriteQueue = partialWriteQueue
+          .catch(() => undefined)
+          .then(async () => {
+            const partialText = translatedChunks.filter(Boolean).join("\n\n");
+            if (partialText) {
+              await fs.writeFile(partialPath, partialText, "utf8");
+            }
+          });
+        return translated;
+      });
+
+      await partialWriteQueue;
+
+      const translatedText = prepared.chunks.length
+        ? restorePreservedMarkdown(
+            translatedChunks.join("\n\n"),
+            prepared.preservedBlocks,
+          )
+        : prepared.cleanedMarkdown;
+
+      await fs.writeFile(markdownPath, translatedText, "utf8");
+      console.log(`   wrote ${markdownPath}`);
+    } catch (error) {
+      console.error(
+        `   failed ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
       );
+      continue;
     }
-
-    const translatedText = prepared.chunks.length
-      ? restorePreservedMarkdown(
-          translatedChunks.join("\n\n"),
-          prepared.preservedBlocks,
-        )
-      : prepared.cleanedMarkdown;
-
-    const baseName = path.basename(filePath, path.extname(filePath));
-    const safeBaseName = sanitizeFileName(baseName);
-    const markdownPath = path.join(outputDir, `${safeBaseName}.translated.md`);
-
-    await fs.writeFile(markdownPath, translatedText, "utf8");
-    console.log(`   wrote ${markdownPath}`);
   }
 }
 
@@ -176,7 +221,8 @@ Options:
   --api-key <key>                 Translation API key
   --model <name>                  Model name
   --target-language <v>           Target language, default: 简体中文
-  --chunk-chars <n>               Chunk size, default: 2800
+  --chunk-chars <n>               Chunk size, default: 9000
+  --concurrency <n>               Parallel translation requests, default: 3
   --output-dir <dir>              Output directory, default: batch-output
   --pages <range>                 pdftotext page range, e.g. 1-5
   --system-prompt <text>          Custom system prompt
@@ -184,7 +230,8 @@ Options:
   --mineru-base-url <url>         MinerU base URL, default: https://mineru.net/api/v4
   --skip-images <true|false>      Preserve image markdown without translating it
   --skip-tables <true|false>      Preserve table/code markdown without translating it
-  --skip-references <true|false>  Stop translating at references heading
+  --skip-front-matter <true|false> Skip title/authors before abstract or first section
+  --skip-references <true|false>  Preserve references/appendix and everything after them, default: true
 
 Env:
   TRANSLATION_API_KEY
@@ -192,6 +239,7 @@ Env:
   TRANSLATION_MODEL
   TRANSLATION_TARGET_LANGUAGE
   TRANSLATION_CHUNK_CHARS
+  TRANSLATION_CONCURRENCY
   TRANSLATION_OUTPUT_DIR
   MINERU_API_TOKEN
   MINERU_BASE_URL`);
@@ -384,7 +432,10 @@ function normalizeLineEndings(text) {
 
 function prepareMarkdownForTranslation(markdown, settings) {
   const extracted = extractBlocks(normalizeLineEndings(markdown), settings);
-  const translationMarkdown = extracted.blocks.join("\n\n").trim();
+  const translationBlocks = settings.skipFrontMatter
+    ? stripLeadingFrontMatter(extracted.blocks)
+    : extracted.blocks;
+  const translationMarkdown = translationBlocks.join("\n\n").trim();
   const cleanedMarkdown = restorePreservedMarkdown(
     translationMarkdown,
     extracted.preservedBlocks,
@@ -393,8 +444,8 @@ function prepareMarkdownForTranslation(markdown, settings) {
   return {
     cleanedMarkdown,
     translationMarkdown,
-    chunks: extracted.translatableBlockCount
-      ? chunkBlocks(extracted.blocks, settings.chunkChars)
+    chunks: countTranslatableBlocks(translationBlocks)
+      ? chunkBlocks(translationBlocks, settings.chunkChars)
       : [],
     preservedBlocks: extracted.preservedBlocks,
   };
@@ -409,6 +460,7 @@ function extractBlocks(markdown, settings) {
   let translatableBlockCount = 0;
   let inFence = false;
   let htmlPreserveTag = null;
+  let preserveTail = false;
 
   const flushCurrent = () => {
     const block = current.join("\n").trim();
@@ -435,6 +487,12 @@ function extractBlocks(markdown, settings) {
   for (const rawLine of lines) {
     const line = rawLine.trimEnd();
 
+    if (preserveTail) {
+      flushCurrent();
+      preservedCurrent.push(line);
+      continue;
+    }
+
     if (htmlPreserveTag) {
       flushCurrent();
       preservedCurrent.push(line);
@@ -460,10 +518,12 @@ function extractBlocks(markdown, settings) {
       continue;
     }
 
-    if (settings.skipReferences && isReferenceHeading(line)) {
+    if (settings.skipReferences && shouldPreserveTailFromHeading(line)) {
       flushCurrent();
       flushPreserved();
-      break;
+      preservedCurrent.push(line);
+      preserveTail = true;
+      continue;
     }
 
     const openedTag = getOpenedHtmlPreserveTag(line, settings);
@@ -528,9 +588,9 @@ function getOpenedHtmlPreserveTag(line, settings) {
   return null;
 }
 
-function isReferenceHeading(line) {
-  const heading = line.replace(/^#+\s*/, "").trim().toLowerCase();
-  return REFERENCE_HEADINGS.includes(heading);
+function shouldPreserveTailFromHeading(line) {
+  const heading = line.replace(/^#+\s*/, "").trim();
+  return TAIL_PRESERVE_HEADING_PATTERNS.some((pattern) => pattern.test(heading));
 }
 
 function chunkBlocks(blocks, maxChars) {
@@ -559,6 +619,42 @@ function chunkBlocks(blocks, maxChars) {
   return chunks;
 }
 
+function stripLeadingFrontMatter(blocks) {
+  const firstContentIndex = blocks.findIndex((block) => isMainContentStart(block));
+  if (firstContentIndex <= 0) {
+    return blocks;
+  }
+  return blocks.slice(firstContentIndex);
+}
+
+function isMainContentStart(block) {
+  if (!block || isPreservedToken(block)) {
+    return false;
+  }
+
+  const firstLine = block
+    .split("\n")
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (!firstLine) {
+    return false;
+  }
+
+  const normalized = firstLine.replace(/^#+\s*/, "").trim();
+  return MAIN_CONTENT_HEADINGS.some((pattern) => pattern.test(normalized));
+}
+
+function countTranslatableBlocks(blocks) {
+  return blocks.filter((block) => !isPreservedToken(block)).length;
+}
+
+function isPreservedToken(block) {
+  return (
+    block.startsWith(PRESERVE_TOKEN_PREFIX) &&
+    block.endsWith(PRESERVE_TOKEN_SUFFIX)
+  );
+}
+
 function restorePreservedMarkdown(markdown, preservedBlocks) {
   let restored = markdown;
   for (const block of preservedBlocks) {
@@ -582,33 +678,38 @@ async function translateChunk(params) {
           messages: createMessages(params),
         };
 
-  const response = await fetch(endpoint.url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${params.apiKey}`,
-    },
-    body: JSON.stringify(body),
+  const response = await retryTranslationRequest(async () => {
+    const response = await fetch(endpoint.url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${params.apiKey}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    const raw = await response.text();
+    if (!response.ok) {
+      throw new Error(
+        `Translation request failed (${response.status}): ${raw.slice(0, 500)}`,
+      );
+    }
+
+    const parsed = JSON.parse(raw);
+    const text =
+      endpoint.apiStyle === "responses"
+        ? extractResponsesText(parsed)
+        : extractChatText(parsed);
+
+    if (!text) {
+      throw new Error(
+        `Translation API returned empty content: ${raw.slice(0, 500)}`,
+      );
+    }
+
+    return text;
   });
-
-  const raw = await response.text();
-  if (!response.ok) {
-    throw new Error(
-      `Translation request failed (${response.status}): ${raw.slice(0, 500)}`,
-    );
-  }
-
-  const parsed = JSON.parse(raw);
-  const text =
-    endpoint.apiStyle === "responses"
-      ? extractResponsesText(parsed)
-      : extractChatText(parsed);
-
-  if (!text) {
-    throw new Error(`Translation API returned empty content: ${raw.slice(0, 500)}`);
-  }
-
-  return text;
+  return response;
 }
 
 function createMessages(params) {
@@ -678,6 +779,72 @@ function parseBoolean(value, defaultValue) {
     return value;
   }
   return !["false", "0", "no"].includes(String(value).toLowerCase());
+}
+
+function clampConcurrency(value) {
+  if (!Number.isFinite(value)) {
+    return 3;
+  }
+  return Math.max(1, Math.min(8, Math.floor(value)));
+}
+
+async function retryTranslationRequest(requestFn) {
+  let lastError;
+
+  for (let attempt = 0; attempt < MAX_TRANSLATION_RETRIES; attempt++) {
+    try {
+      return await requestFn();
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableTranslationError(error) || attempt === MAX_TRANSLATION_RETRIES - 1) {
+        throw error;
+      }
+      await delay(RETRY_BASE_DELAY_MS * (attempt + 1));
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+function isRetryableTranslationError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (
+    message.includes("Network request failed") ||
+    message.includes("Unknown network error") ||
+    message.includes("timed out") ||
+    message.includes("no HTTP response")
+  ) {
+    return true;
+  }
+
+  return RETRYABLE_STATUS_CODES.some((status) =>
+    message.includes(`(${status})`),
+  );
+}
+
+async function mapWithConcurrency(items, concurrency, worker) {
+  if (!items.length) {
+    return [];
+  }
+
+  const results = new Array(items.length);
+  const limit = Math.min(Math.max(1, concurrency || 1), items.length);
+  let nextIndex = 0;
+
+  await Promise.all(
+    Array.from({ length: limit }, async () => {
+      while (true) {
+        const index = nextIndex;
+        nextIndex += 1;
+        if (index >= items.length) {
+          return;
+        }
+        results[index] = await worker(items[index], index, items.length);
+      }
+    }),
+  );
+
+  return results;
 }
 
 function sanitizeFileName(value) {

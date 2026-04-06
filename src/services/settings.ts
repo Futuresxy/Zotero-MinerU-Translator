@@ -25,8 +25,10 @@ export interface TranslationSettings {
   systemPrompt: string;
   temperature: number;
   chunkChars: number;
+  concurrency: number;
   skipImages: boolean;
   skipTables: boolean;
+  skipFrontMatter: boolean;
   skipReferences: boolean;
   noteHeading: string;
   includeOriginalMarkdown: boolean;
@@ -78,11 +80,15 @@ export function getWorkflowSettings(): WorkflowSettings {
       systemPrompt: getPref("translationSystemPrompt").trim(),
       temperature: clampTemperature(getPref("translationTemperature")),
       chunkChars: Math.max(
-        800,
-        Number(getPref("translationChunkChars")) || 2800,
+        2000,
+        Number(getPref("translationChunkChars")) || 9000,
+      ),
+      concurrency: clampConcurrency(
+        Number(getPref("translationConcurrency")) || 3,
       ),
       skipImages: getPref("skipImages"),
       skipTables: getPref("skipTables"),
+      skipFrontMatter: getPref("skipFrontMatter"),
       skipReferences: getPref("skipReferences"),
       noteHeading: getPref("noteHeading").trim() || "PDF 翻译",
       includeOriginalMarkdown: getPref("includeOriginalMarkdown"),
@@ -118,4 +124,11 @@ function clampTemperature(value: string) {
     return 0.1;
   }
   return Math.max(0, Math.min(2, numeric));
+}
+
+function clampConcurrency(value: number) {
+  if (!Number.isFinite(value)) {
+    return 3;
+  }
+  return Math.max(1, Math.min(8, Math.floor(value)));
 }
