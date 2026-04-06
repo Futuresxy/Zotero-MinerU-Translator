@@ -1,48 +1,47 @@
-interface FetchOptions extends RequestInit {
+interface HTTPOptions {
+  method?: string;
+  body?: string | Uint8Array;
   timeoutMs?: number;
-  headers?: HeadersInit;
+  headers?: Record<string, string>;
+  responseType?: XMLHttpRequestResponseType;
 }
 
 export async function fetchJSON<T>(
   url: string,
-  options: FetchOptions = {},
+  options: HTTPOptions = {},
 ): Promise<T> {
-  const response = await fetchWithTimeout(url, {
+  const xhr = await request(url, {
     ...options,
     headers: {
       Accept: "application/json",
       ...(options.headers || {}),
     },
   });
-  const text = await response.text();
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${text.slice(0, 240)}`);
-  }
+  const text = getResponseText(xhr);
+  ensureSuccess(xhr, text);
   return JSON.parse(text) as T;
 }
 
 export async function fetchText(
   url: string,
-  options: FetchOptions = {},
+  options: HTTPOptions = {},
 ): Promise<string> {
-  const response = await fetchWithTimeout(url, options);
-  const text = await response.text();
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${text.slice(0, 240)}`);
-  }
+  const xhr = await request(url, options);
+  const text = getResponseText(xhr);
+  ensureSuccess(xhr, text);
   return text;
 }
 
 export async function fetchBinary(
   url: string,
-  options: FetchOptions = {},
+  options: HTTPOptions = {},
 ): Promise<Uint8Array> {
-  const response = await fetchWithTimeout(url, options);
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`HTTP ${response.status}: ${text.slice(0, 240)}`);
-  }
-  return new Uint8Array(await response.arrayBuffer());
+  const xhr = await request(url, {
+    ...options,
+    responseType: "arraybuffer",
+  });
+  ensureSuccess(xhr, getResponseText(xhr));
+  return new Uint8Array((xhr.response as ArrayBuffer) || new ArrayBuffer(0));
 }
 
 export async function putBinary(
@@ -50,56 +49,64 @@ export async function putBinary(
   data: Uint8Array,
   timeoutMs = 120000,
 ) {
-  const response = await fetchWithTimeout(url, {
+  const xhr = await request(url, {
     method: "PUT",
     body: data,
     timeoutMs,
   });
 
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Upload failed (${response.status}): ${body.slice(0, 240)}`);
-  }
+  ensureSuccess(xhr, getResponseText(xhr), "Upload failed");
 }
 
-async function fetchWithTimeout(
+async function request(
   url: string,
-  options: FetchOptions = {},
-): Promise<Response> {
-  const timeoutMs = options.timeoutMs ?? 60000;
-  const abortController = createAbortController();
-  const fetchPromise = fetch(url, {
-    ...options,
-    ...(abortController ? { signal: abortController.signal } : {}),
-  });
-
-  if (!timeoutMs || timeoutMs <= 0) {
-    return fetchPromise;
-  }
-
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  options: HTTPOptions = {},
+): Promise<XMLHttpRequest> {
+  const method = options.method || "GET";
 
   try {
-    return await Promise.race([
-      fetchPromise,
-      new Promise<Response>((_, reject) => {
-        timer = setTimeout(() => {
-          abortController?.abort();
-          reject(new Error(`Request timed out after ${timeoutMs}ms: ${url}`));
-        }, timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timer) {
-      clearTimeout(timer);
-    }
+    return await Zotero.HTTP.request(method, url, {
+      body: options.body,
+      headers: options.headers,
+      responseType: options.responseType,
+      successCodes: false,
+      timeout: options.timeoutMs ?? 60000,
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unknown network error.";
+    throw new Error(`Network request failed for ${url}: ${message}`);
   }
 }
 
-function createAbortController(): AbortController | undefined {
-  const AbortControllerCtor = globalThis.AbortController;
-  if (!AbortControllerCtor) {
-    return undefined;
+function ensureSuccess(
+  xhr: XMLHttpRequest,
+  text: string,
+  prefix = "HTTP request failed",
+) {
+  if (xhr.status >= 200 && xhr.status < 300) {
+    return;
   }
-  return new AbortControllerCtor();
+
+  throw new Error(`${prefix} (${xhr.status}): ${text.slice(0, 240)}`);
+}
+
+function getResponseText(xhr: XMLHttpRequest) {
+  if (typeof xhr.responseText === "string" && xhr.responseText) {
+    return xhr.responseText;
+  }
+
+  if (typeof xhr.response === "string") {
+    return xhr.response;
+  }
+
+  if (xhr.response instanceof ArrayBuffer) {
+    try {
+      return new TextDecoder().decode(new Uint8Array(xhr.response));
+    } catch {
+      return "";
+    }
+  }
+
+  return "";
 }

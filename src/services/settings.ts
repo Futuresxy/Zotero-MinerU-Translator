@@ -94,7 +94,14 @@ function normalizeProvider(value: string): TranslationProvider {
   const normalized = value.trim().toLowerCase();
   if (normalized === "openai") return "openai";
   if (normalized === "deepseek") return "deepseek";
-  if (normalized === "doubao") return "doubao";
+  if (
+    normalized === "doubao" ||
+    normalized === "ark" ||
+    normalized === "volcano ark" ||
+    normalized === "volcano-ark"
+  ) {
+    return "doubao";
+  }
   return "custom";
 }
 
