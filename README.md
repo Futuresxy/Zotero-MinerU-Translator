@@ -115,6 +115,25 @@ npm start
 npm run build
 ```
 
+批量翻译脚本：
+
+```bash
+MINERU_API_TOKEN="<your-mineru-token>" \
+TRANSLATION_API_KEY="<your-key>" \
+npm run batch:translate -- \
+  --input example \
+  --extractor mineru \
+  --base-url https://ark.cn-beijing.volces.com/api/v3/responses \
+  --model doubao-seed-1-8-251228 \
+  --output-dir batch-output
+```
+
+说明：
+
+- 提供 `MINERU_API_TOKEN` 时，脚本会优先走 MinerU，保留图片和表格的 Markdown 代码但不翻译它们
+- 不提供 MinerU Token 时，会回退到本机 `pdftotext`，这时无法保留 MinerU 识别出的图片和表格 Markdown
+- 默认只输出 `*.translated.md`
+
 打包产物：
 
 - `.scaffold/build/zotero-miner-u-translator.xpi`

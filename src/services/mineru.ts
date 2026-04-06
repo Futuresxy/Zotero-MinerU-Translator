@@ -70,7 +70,16 @@ export async function convertPdfsToMarkdown(
 
   for (let index = 0; index < targets.length; index++) {
     const binary = await readFileBytes(targets[index].filePath);
-    await putBinary(createResponse.data.file_urls[index], binary);
+    const uploadURL = createResponse.data.file_urls[index];
+    try {
+      await putBinary(uploadURL, binary);
+    } catch (error) {
+      const host = getHostLabel(uploadURL);
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `MinerU upload failed for ${targets[index].fileName} (${host}): ${detail}`,
+      );
+    }
   }
 
   const batchID = createResponse.data.batch_id;
@@ -158,4 +167,12 @@ async function readFileBytes(filePath: string): Promise<Uint8Array> {
     throw new Error("IOUtils.read is not available in this Zotero runtime.");
   }
   return (await ioUtils.read(filePath)) as Uint8Array;
+}
+
+function getHostLabel(url: string) {
+  try {
+    return new URL(url).host;
+  } catch {
+    return "unknown host";
+  }
 }

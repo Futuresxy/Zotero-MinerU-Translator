@@ -5,7 +5,10 @@ import { saveTranslationNote } from "../services/note";
 import { getSelectedPdfTargets } from "../services/selection";
 import { getWorkflowSettings } from "../services/settings";
 import { getString } from "../utils/locale";
-import { prepareMarkdownForTranslation } from "../utils/markdown";
+import {
+  prepareMarkdownForTranslation,
+  restorePreservedMarkdown,
+} from "../utils/markdown";
 
 let running = false;
 
@@ -71,8 +74,11 @@ export async function translateSelectedPdfs() {
       });
 
       const translatedMarkdown = prepared.chunks.length
-        ? await translateMarkdownChunks(prepared.chunks, settings.translation)
-        : "";
+        ? restorePreservedMarkdown(
+            await translateMarkdownChunks(prepared.chunks, settings.translation),
+            prepared.preservedBlocks,
+          )
+        : prepared.cleanedMarkdown;
 
       progressWindow.createLine({
         text: `[${index + 1}/${targets.length}] ${target.displayTitle}: ${getString("menu-progress-note")}`,

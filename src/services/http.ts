@@ -88,6 +88,19 @@ function ensureSuccess(
     return;
   }
 
+  if (xhr.status === 0) {
+    let host = "";
+    try {
+      host = new URL(xhr.responseURL || "").host;
+    } catch {
+      host = "";
+    }
+    const locationHint = host ? ` from ${host}` : "";
+    throw new Error(
+      `${prefix} (0): no HTTP response${locationHint}. In Zotero this usually means the request was blocked, the TLS/proxy chain interfered, or the remote upload endpoint closed the connection before replying.`,
+    );
+  }
+
   throw new Error(`${prefix} (${xhr.status}): ${text.slice(0, 240)}`);
 }
 
