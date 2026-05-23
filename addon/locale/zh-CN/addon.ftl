@@ -1,10 +1,12 @@
-startup-finish = Zotero MinerU Translator 已就绪
+startup-finish = MineruDS Translator 已就绪
 menuitem-label = 翻译 PDF 并写入笔记
-prefs-title = Zotero MinerU Translator
+prefs-title = MineruDS Translator
 menu-progress-start = 开始执行 PDF 翻译流程
 menu-progress-mineru = 正在使用 MinerU 解析 PDF
 menu-progress-translate = 正在翻译 Markdown 分段
 menu-progress-note = 正在写入 Zotero 笔记
+menu-progress-closable = 进度窗会保持显示，可随时点击关闭
+menu-progress-close-manually = 任务已结束，可按需关闭这个进度窗
 menu-progress-done = 翻译完成
 menu-error-no-pdf = 请先选中 PDF 附件，或选中包含 PDF 附件的父条目。
 menu-error-disabled = 插件设置中已关闭翻译功能。

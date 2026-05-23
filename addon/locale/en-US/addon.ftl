@@ -1,10 +1,12 @@
-startup-finish = Zotero MinerU Translator is ready
+startup-finish = MineruDS Translator is ready
 menuitem-label = Translate PDF and Save to Note
-prefs-title = Zotero MinerU Translator
+prefs-title = MineruDS Translator
 menu-progress-start = Starting PDF translation workflow
 menu-progress-mineru = Parsing PDFs with MinerU
 menu-progress-translate = Translating Markdown blocks
 menu-progress-note = Writing translation to Zotero note
+menu-progress-closable = This progress window stays open and can be closed any time
+menu-progress-close-manually = The task has ended; close this progress window whenever you want
 menu-progress-done = Translation completed
 menu-error-no-pdf = Select a PDF attachment or a parent item containing a PDF attachment first.
 menu-error-disabled = Translation is disabled in the plugin preferences.

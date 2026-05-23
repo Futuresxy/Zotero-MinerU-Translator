@@ -1,4 +1,5 @@
 import type { PdfTarget } from "./selection";
+import type { MarkdownFilterStats } from "../utils/markdown";
 
 interface TranslationNoteBaseParams {
   target: PdfTarget;
@@ -6,70 +7,85 @@ interface TranslationNoteBaseParams {
   includeOriginalMarkdown: boolean;
   heading: string;
   providerLabel: string;
+  modelLabel: string;
   targetLanguage: string;
+  filterStats: MarkdownFilterStats;
 }
 
-interface CreateTranslationNotesParams extends TranslationNoteBaseParams {
+interface CreateTranslationNoteParams extends TranslationNoteBaseParams {
   totalChunks: number;
 }
 
 interface UpdateTranslationNoteParams extends TranslationNoteBaseParams {
   translatedMarkdown: string;
-  cleanedMarkdown: string;
   completedChunks: number;
   totalChunks: number;
   status: "pending" | "translating" | "partial" | "completed" | "failed";
   errorMessage?: string;
 }
 
-export interface TranslationNoteBundle {
-  translationNote: Zotero.Item;
-  originalNote: Zotero.Item;
-}
-
-export async function createTranslationNotes(
-  params: CreateTranslationNotesParams,
-): Promise<TranslationNoteBundle> {
-  const translationNote = createChildNote(params.target);
+export async function createOrReuseTranslationNote(
+  params: CreateTranslationNoteParams,
+) {
+  const translationNote = (await findExistingTranslationNote(params.target)) ||
+    createChildNote(params.target);
   translationNote.setNote(
-    renderTranslatedNoteHtml({
+    renderTranslationNoteHtml({
       ...params,
       translatedMarkdown: "",
-      cleanedMarkdown: "",
       completedChunks: 0,
       totalChunks: params.totalChunks,
       status: "pending",
     }),
   );
   await translationNote.saveTx();
-
-  const originalNote = createChildNote(params.target);
-  originalNote.setNote(renderOriginalMarkdownNoteHtml(params));
-  await originalNote.saveTx();
-
-  return {
-    translationNote,
-    originalNote,
-  };
+  return translationNote;
 }
 
 export async function updateTranslationNote(
   noteItem: Zotero.Item,
   params: UpdateTranslationNoteParams,
 ) {
-  noteItem.setNote(renderTranslatedNoteHtml(params));
+  noteItem.setNote(renderTranslationNoteHtml(params));
   await noteItem.saveTx();
 }
 
-function renderTranslatedNoteHtml(params: UpdateTranslationNoteParams) {
+async function findExistingTranslationNote(target: PdfTarget) {
+  const noteIDs = target.parentItem?.getNotes?.() || [];
+  const marker = getAttachmentMarker(target);
+
+  for (const noteID of noteIDs) {
+    const item = (await Zotero.Items.getAsync(noteID)) as Zotero.Item;
+    if (item.getNote().includes(marker)) {
+      return item;
+    }
+  }
+
+  return null;
+}
+
+function renderTranslationNoteHtml(params: UpdateTranslationNoteParams) {
   const metadataRows = [
-    ["Source PDF", params.target.fileName],
-    ["Parent Item", params.target.displayTitle],
-    ["Provider", params.providerLabel],
-    ["Target Language", params.targetLanguage],
-    ["Status", renderStatusLabel(params.status)],
-    ["Progress", `${params.completedChunks}/${params.totalChunks}`],
-    ["Generated At", new Date().toLocaleString()],
+    ["来源 PDF", params.target.fileName],
+    ["所属条目", params.target.displayTitle],
+    ["翻译提供方", params.providerLabel],
+    ["模型", params.modelLabel],
+    ["目标语言", params.targetLanguage],
+    ["状态", renderStatusLabel(params.status)],
+    ["分段进度", `${params.completedChunks}/${params.totalChunks}`],
+    ["跳过图片", String(params.filterStats.imagesRemoved)],
+    ["跳过表格", String(params.filterStats.tablesRemoved)],
+    ["跳过算法/伪代码", String(params.filterStats.algorithmsRemoved)],
+    ["跳过 details/包装块", String(params.filterStats.detailsRemoved)],
+    [
+      "跳过参考文献",
+      params.filterStats.referencesRemoved ? "是" : "否",
+    ],
+    [
+      "跳过前置信息区块",
+      String(params.filterStats.frontMatterBlocksRemoved),
+    ],
+    ["生成时间", new Date().toLocaleString()],
   ]
     .map(
       ([label, value]) =>
@@ -78,45 +94,32 @@ function renderTranslatedNoteHtml(params: UpdateTranslationNoteParams) {
     .join("");
 
   const sections = [
+    `<!-- ${escapeHtml(getAttachmentMarker(params.target))} -->`,
     `<h1>${escapeHtml(`${params.heading}｜${params.target.displayTitle}`)}</h1>`,
     metadataRows,
   ];
 
   if (params.errorMessage) {
-    sections.push(`<p><strong>Error:</strong> ${escapeHtml(params.errorMessage)}</p>`);
+    sections.push(
+      `<p><strong>错误信息:</strong> ${escapeHtml(params.errorMessage)}</p>`,
+    );
   }
 
-  sections.push("<h2>Translated Markdown</h2>");
-  sections.push(
-    `<pre>${escapeHtml(params.translatedMarkdown || params.cleanedMarkdown || "")}</pre>`,
-  );
+  sections.push("<h2>译文</h2>");
+  if (params.translatedMarkdown.trim()) {
+    sections.push(renderMarkdownAsHtml(params.translatedMarkdown));
+  } else if (params.status === "completed") {
+    sections.push("<p><em>过滤后没有可翻译的正文内容。</em></p>");
+  } else {
+    sections.push("<p><em>正在准备翻译内容……</em></p>");
+  }
 
   if (params.includeOriginalMarkdown) {
-    sections.push("<h2>Original Markdown</h2>");
+    sections.push("<h2>MinerU 原始 Markdown</h2>");
     sections.push(`<pre>${escapeHtml(params.originalMarkdown)}</pre>`);
   }
 
   return sections.join("\n");
-}
-
-function renderOriginalMarkdownNoteHtml(params: TranslationNoteBaseParams) {
-  const metadataRows = [
-    ["Source PDF", params.target.fileName],
-    ["Parent Item", params.target.displayTitle],
-    ["Generated At", new Date().toLocaleString()],
-  ]
-    .map(
-      ([label, value]) =>
-        `<p><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}</p>`,
-    )
-    .join("");
-
-  return [
-    `<h1>${escapeHtml(`MinerU Markdown｜${params.target.displayTitle}`)}</h1>`,
-    metadataRows,
-    "<h2>Original Markdown</h2>",
-    `<pre>${escapeHtml(params.originalMarkdown)}</pre>`,
-  ].join("\n");
 }
 
 function createChildNote(target: PdfTarget) {
@@ -128,12 +131,123 @@ function createChildNote(target: PdfTarget) {
   return noteItem;
 }
 
+function getAttachmentMarker(target: PdfTarget) {
+  return `ZPT_TRANSLATION_NOTE attachment-id=${target.attachment.id}`;
+}
+
 function renderStatusLabel(status: UpdateTranslationNoteParams["status"]) {
-  if (status === "pending") return "Pending";
-  if (status === "translating") return "Translating";
-  if (status === "partial") return "Partial";
-  if (status === "completed") return "Completed";
-  return "Failed";
+  if (status === "pending") return "待处理";
+  if (status === "translating") return "翻译中";
+  if (status === "partial") return "部分完成";
+  if (status === "completed") return "已完成";
+  return "失败";
+}
+
+function renderMarkdownAsHtml(markdown: string) {
+  const blocks = markdown
+    .replace(/\r\n/g, "\n")
+    .trim()
+    .split(/\n\s*\n/g)
+    .map((block) => block.trim())
+    .filter(Boolean);
+
+  return blocks.map((block) => renderMarkdownBlock(block)).join("\n");
+}
+
+function renderMarkdownBlock(block: string) {
+  const lines = block.split("\n");
+  const firstLine = lines[0].trim();
+  const headingMatch = firstLine.match(/^(#{1,6})\s+(.+)$/);
+
+  if (headingMatch) {
+    const level = Math.min(6, headingMatch[1].length);
+    return `<h${level}>${renderInlineMarkdown(headingMatch[2])}</h${level}>`;
+  }
+
+  if (firstLine.startsWith("```") || firstLine.startsWith("~~~")) {
+    const code = lines.slice(1, -1).join("\n");
+    return `<pre><code>${escapeHtml(code)}</code></pre>`;
+  }
+
+  if (lines.every((line) => /^\s*[-*+]\s+/.test(line))) {
+    const items = lines
+      .map((line) => line.replace(/^\s*[-*+]\s+/, ""))
+      .map((line) => `<li>${renderInlineMarkdown(line)}</li>`)
+      .join("");
+    return `<ul>${items}</ul>`;
+  }
+
+  if (lines.every((line) => /^\s*\d+\.\s+/.test(line))) {
+    const items = lines
+      .map((line) => line.replace(/^\s*\d+\.\s+/, ""))
+      .map((line) => `<li>${renderInlineMarkdown(line)}</li>`)
+      .join("");
+    return `<ol>${items}</ol>`;
+  }
+
+  if (lines.every((line) => /^\s*>\s?/.test(line))) {
+    const text = lines
+      .map((line) => line.replace(/^\s*>\s?/, ""))
+      .map((line) => renderInlineMarkdown(line))
+      .join("<br/>");
+    return `<blockquote>${text}</blockquote>`;
+  }
+
+  if (/^---+$/.test(firstLine) || /^\*\*\*+$/.test(firstLine)) {
+    return "<hr />";
+  }
+
+  return `<p>${lines.map((line) => renderInlineMarkdown(line)).join("<br/>")}</p>`;
+}
+
+function renderInlineMarkdown(value: string) {
+  const placeholders: string[] = [];
+  let escaped = escapeHtml(value);
+
+  escaped = escaped.replace(
+    /`([^`]+)`/g,
+    (_, text: string) => storePlaceholder(placeholders, `<code>${text}</code>`),
+  );
+  escaped = escaped.replace(
+    /\[([^\]]+)]\((https?:\/\/[^)\s]+)\)/g,
+    (_, text: string, url: string) =>
+      storePlaceholder(
+        placeholders,
+        `<a href="${escapeHtml(url)}">${escapeHtml(text)}</a>`,
+      ),
+  );
+  escaped = escaped.replace(
+    /\*\*([^*]+)\*\*/g,
+    (_, text: string) => storePlaceholder(placeholders, `<strong>${text}</strong>`),
+  );
+  escaped = escaped.replace(
+    /__([^_]+)__/g,
+    (_, text: string) => storePlaceholder(placeholders, `<strong>${text}</strong>`),
+  );
+  escaped = escaped.replace(
+    /(^|[\s(])\*([^*]+)\*(?=[\s).,;:!?]|$)/g,
+    (_, prefix: string, text: string) =>
+      `${prefix}${storePlaceholder(placeholders, `<em>${text}</em>`)}`,
+  );
+  escaped = escaped.replace(
+    /(^|[\s(])_([^_]+)_(?=[\s).,;:!?]|$)/g,
+    (_, prefix: string, text: string) =>
+      `${prefix}${storePlaceholder(placeholders, `<em>${text}</em>`)}`,
+  );
+
+  return restorePlaceholders(escaped, placeholders);
+}
+
+function storePlaceholder(placeholders: string[], html: string) {
+  const token = `[[[ZPT_HTML_${placeholders.length}]]]`;
+  placeholders.push(html);
+  return token;
+}
+
+function restorePlaceholders(value: string, placeholders: string[]) {
+  return value.replace(/\[\[\[ZPT_HTML_(\d+)\]\]\]/g, (_, index: string) => {
+    return placeholders[Number(index)] || "";
+  });
 }
 
 function escapeHtml(value: string) {

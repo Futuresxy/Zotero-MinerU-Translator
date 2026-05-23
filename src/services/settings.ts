@@ -34,6 +34,7 @@ export interface TranslationSettings {
   concurrency: number;
   skipImages: boolean;
   skipTables: boolean;
+  skipAlgorithms: boolean;
   skipFrontMatter: boolean;
   skipReferences: boolean;
   noteHeading: string;
@@ -100,6 +101,7 @@ export function getWorkflowSettings(): WorkflowSettings {
       ),
       skipImages: getPref("skipImages"),
       skipTables: getPref("skipTables"),
+      skipAlgorithms: getPref("skipAlgorithms"),
       skipFrontMatter: getPref("skipFrontMatter"),
       skipReferences: getPref("skipReferences"),
       noteHeading: getPref("noteHeading").trim() || "PDF 翻译",

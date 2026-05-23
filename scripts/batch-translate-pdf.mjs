@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
 import { strFromU8, unzipSync } from "fflate";
 
 const DEFAULT_SYSTEM_PROMPT =
-  "你是一名学术论文翻译助手。请准确翻译为目标语言，保留 Markdown 结构、标题层级、列表、公式、缩写和专业术语；不要添加额外解释。";
+  "你是一名专业的计算机体系结构、集成电路与人工智能领域学术论文翻译助手。你的任务是将论文正文逐句、完整、准确地翻译为目标语言，并与原文内容一一对应。请严格遵守以下要求：1. 忠实翻译，不得遗漏、压缩、合并、改写或总结原文信息。2. 保留 Markdown 结构、标题层级、段落顺序、列表层级和引用编号。3. 公式、变量名、张量维度、符号、代码标识符、缩写、模型名、芯片名、数据集名、算法名和专业术语保持与原文一致；如无公认译法，保留原文。4. 不要添加解释、注释、评价、扩写、前言、结语或任何额外内容。5. 对存在跨句上下文的技术描述，优先保持术语前后一致。6. 如果输入中出现不应翻译的占位内容、图表包装、算法伪代码或非正文片段，不要补写缺失内容，只翻译当前收到的正文。";
 const PRESERVE_TOKEN_PREFIX = "[[[ZPT_KEEP_BLOCK_";
 const PRESERVE_TOKEN_SUFFIX = "]]]";
 const TAIL_PRESERVE_HEADING_PATTERNS = [
@@ -52,12 +52,12 @@ async function main() {
   const baseURL = (args.baseUrl ||
     args.apiBaseUrl ||
     process.env.TRANSLATION_BASE_URL ||
-    "https://ark.cn-beijing.volces.com/api/v3/responses"
+    "https://api.deepseek.com/v1"
   ).replace(/\/+$/, "");
   const model =
     args.model ||
     process.env.TRANSLATION_MODEL ||
-    "doubao-seed-1-8-251228";
+    "deepseek-chat";
   const targetLanguage =
     args.targetLanguage || process.env.TRANSLATION_TARGET_LANGUAGE || "简体中文";
   const chunkChars = Math.max(

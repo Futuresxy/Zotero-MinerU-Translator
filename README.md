@@ -1,9 +1,9 @@
-# Zotero MinerU Translator
+# MineruDS Translator
 
 [![Zotero 7](https://img.shields.io/badge/Zotero-7-green?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org/)
 [![Using Zotero Plugin Template](https://img.shields.io/badge/Using-Zotero%20Plugin%20Template-blue?style=flat-square&logo=github)](https://github.com/windingwind/zotero-plugin-template)
 
-Zotero 7 插件，用于把 Zotero 中的 PDF 论文送到 MinerU 批量解析接口，提取 Markdown，再调用 OpenAI 兼容的大模型接口分段翻译，并把结果保存为 Zotero 笔记。
+Zotero 7 插件，用于把 Zotero 中的 PDF 论文送到 MinerU 批量解析接口，提取 Markdown，再调用 DeepSeek / OpenAI 兼容的大模型接口做分段详细翻译，并把结果持续写回同一个 Zotero 子笔记。
 
 ## 当前实现
 
@@ -13,10 +13,10 @@ Zotero 7 插件，用于把 Zotero 中的 PDF 论文送到 MinerU 批量解析�
 4. PUT 上传 PDF 文件，自动触发 MinerU 解析
 5. 轮询 `GET /api/v4/extract-results/batch/{batch_id}`
 6. 下载返回 zip，并提取 `full.md`
-7. 跳过图片、表格、参考文献区块
-8. 按字符数切分 Markdown
-9. 调用 OpenAI 兼容 `POST /chat/completions`
-10. 将译文 Markdown 作为 Zotero 子笔记保存
+7. 过滤图片、表格、参考文献区块，避免进入最终译文
+8. 按字符数切分 Markdown，并对超长分段失败场景自动二次拆分重试
+9. 调用 OpenAI 兼容 `POST /chat/completions` 或 `POST /responses`
+10. 将译文实时写回同一个 Zotero 子笔记，进度窗保持显示，直到手动关闭
 
 ## 已支持的翻译提供方
 
@@ -40,7 +40,7 @@ Zotero 7 插件，用于把 Zotero 中的 PDF 论文送到 MinerU 批量解析�
 
 在 Zotero 中打开：
 
-- `Tools -> Plugins -> Zotero MinerU Translator -> Preferences`
+- `Tools -> Plugins -> MineruDS Translator -> Preferences`
 
 至少需要配置：
 
@@ -56,6 +56,7 @@ Zotero 7 插件，用于把 Zotero 中的 PDF 论文送到 MinerU 批量解析�
 - `translationTargetLanguage`
 - `translationChunkChars`
 - `includeOriginalMarkdown`
+- `translationConcurrency`
 
 ## 可直接尝试的翻译配置
 
@@ -130,17 +131,17 @@ npm run batch:translate -- \
 
 说明：
 
-- 提供 `MINERU_API_TOKEN` 时，脚本会优先走 MinerU，保留图片和表格的 Markdown 代码但不翻译它们
+- 提供 `MINERU_API_TOKEN` 时，脚本会优先走 MinerU，并在翻译前过滤图片、表格和参考文献
 - 不提供 MinerU Token 时，会回退到本机 `pdftotext`，这时无法保留 MinerU 识别出的图片和表格 Markdown
 - 默认只输出 `*.translated.md`
 
 打包产物：
 
-- `.scaffold/build/zotero-miner-u-translator.xpi`
+- `.scaffold/build/mineruds-translator.xpi`
 
 ## GitHub 仓库初始化
 
-当前仓库默认远程已切换到 `Futuresxy/Zotero-MinerU-Translator`。
+当前仓库保留现有 GitHub release 工作流配置，构建产物名称已调整为 `mineruds-translator.xpi`，方便直接沿用当前仓库发布 release。
 
 如果你以后要切到别的 GitHub 仓库，执行：
 
@@ -162,5 +163,5 @@ git remote add origin https://github.com/<your-user>/<your-repo>.git
 ## 注意事项
 
 - 不建议把 MinerU Token 或 LLM API Key 提交到仓库。
-- 当前笔记内容以 `<pre>` 保存译文 Markdown，优先保证可编辑和结构保真，不是富文本渲染器。
+- 当前版本默认只生成一个翻译子笔记；如启用 `includeOriginalMarkdown`，会把 MinerU 原始 Markdown 附在同一条笔记后部。
 - 当前实现已通过 `npm run build` 打包验证。

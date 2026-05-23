@@ -1,14 +1,14 @@
 {
-  "name": "zotero-mineru-translator",
+  "name": "mineruds-translator",
   "type": "module",
   "version": "0.1.0",
-  "description": "Zotero 7 plugin for converting PDF papers to Markdown with MinerU and saving LLM translations to Zotero notes.",
+  "description": "Zotero 7 plugin for extracting PDF papers with MinerU and saving chunked LLM translations to Zotero notes.",
   "config": {
-    "addonName": "Zotero MinerU Translator",
-    "addonID": "zotero-mineru-translator@songxy.dev",
-    "addonRef": "zoterominerutranslator",
-    "addonInstance": "ZoteroMineruTranslator",
-    "prefsPrefix": "extensions.zotero.zoterominerutranslator"
+    "addonName": "MineruDS Translator",
+    "addonID": "mineruds-translator@songxy.dev",
+    "addonRef": "minerudstranslator",
+    "addonInstance": "MineruDSTranslator",
+    "prefsPrefix": "extensions.zotero.minerudstranslator"
   },
   "repository": {
     "type": "git",

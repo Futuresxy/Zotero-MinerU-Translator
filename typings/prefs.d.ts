@@ -31,6 +31,7 @@ declare namespace _ZoteroTypes {
       "translationConcurrency": number;
       "skipImages": boolean;
       "skipTables": boolean;
+      "skipAlgorithms": boolean;
       "skipFrontMatter": boolean;
       "skipReferences": boolean;
       "noteHeading": string;

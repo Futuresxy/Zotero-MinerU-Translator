@@ -1,222 +1,494 @@
 import type { TranslationSettings } from "../services/settings";
 
-export interface PreservedBlock {
-  token: string;
-  content: string;
+export interface MarkdownFilterStats {
+  imagesRemoved: number;
+  tablesRemoved: number;
+  algorithmsRemoved: number;
+  detailsRemoved: number;
+  referencesRemoved: boolean;
+  frontMatterBlocksRemoved: number;
+  keptBlocks: number;
 }
 
-interface PreparedMarkdown {
+export interface PreparedMarkdown {
   cleanedMarkdown: string;
-  translationMarkdown: string;
   chunks: string[];
-  preservedBlocks: PreservedBlock[];
+  stats: MarkdownFilterStats;
 }
 
-const TAIL_PRESERVE_HEADING_PATTERNS = [
+const REFERENCE_HEADING_PATTERNS = [
   /^references$/i,
   /^bibliography$/i,
   /^references and notes$/i,
-  /^appendix$/i,
-  /^appendices$/i,
-  /^supplement(?:ary)?(?: materials?)?$/i,
+  /^works cited$/i,
   /^参考文献$/,
-  /^附录$/,
 ];
+
 const MAIN_CONTENT_HEADINGS = [
   /^abstract$/i,
   /^摘要$/i,
   /^(?:\d+(?:\.\d+)*|[ivxlcdm]+)[.)]?\s+introduction$/i,
-  /^(?:\d+(?:\.\d+)*|[ivxlcdm]+)[.)]?\s+(?:background|preliminaries|preliminary|related work|method|methods|approach|experiments?|evaluation|results?|discussion|conclusion|appendix)$/i,
-  /^(?:introduction|background|preliminaries|preliminary|related work|method|methods|approach|experiments?|evaluation|results?|discussion|conclusion|appendix)$/i,
-  /^(?:引言|方法|实验|结果|讨论|结论|附录)$/i,
+  /^(?:\d+(?:\.\d+)*|[ivxlcdm]+)[.)]?\s+(?:background|preliminaries|preliminary|related work|method|methods|approach|experiments?|evaluation|results?|discussion|conclusion)$/i,
+  /^(?:introduction|background|preliminaries|preliminary|related work|method|methods|approach|experiments?|evaluation|results?|discussion|conclusion)$/i,
+  /^(?:引言|方法|实验|结果|讨论|结论)$/i,
 ];
 
-const PRESERVE_TOKEN_PREFIX = "[[[ZPT_KEEP_BLOCK_";
-const PRESERVE_TOKEN_SUFFIX = "]]]";
+const FIGURE_CAPTION_PATTERNS = [
+  /^(?:figure|fig\.?)\s*\d+[\s.:：-]/i,
+  /^图\s*\d+[\s.:：-]/,
+];
+const TABLE_CAPTION_PATTERNS = [
+  /^table\s*\d+[\s.:：-]/i,
+  /^表\s*\d+[\s.:：-]/,
+];
+const DETAILS_SUMMARY_HINT_PATTERNS = [
+  /<(?:summary)\b[^>]*>.*?(?:line|scatter|plot|heatmap|bar|chart|table|algorithm|伪代码|曲线|散点|热力|柱状|表格|算法).*?<\/summary>/i,
+  /<(?:summary)\b[^>]*>.*?<\/summary>/i,
+];
+const ALGORITHM_TITLE_PATTERNS = [
+  /^(?:algorithm|alg\.)\s*\d+[\s.:：-]/i,
+  /^算法\s*\d+[\s.:：-]/,
+];
+const ALGORITHM_DIRECTIVE_PATTERNS = [
+  /^(?:require|input|output|ensure|assume|given)\b/i,
+  /^(?:输入|输出|要求|给定|已知|假设)\b/,
+];
+
+interface ExtractedBlocks {
+  blocks: string[];
+  stats: Omit<
+    MarkdownFilterStats,
+    "frontMatterBlocksRemoved" | "keptBlocks"
+  >;
+}
+
+interface HtmlCaptureBlock {
+  tag: "table" | "figure" | "details";
+  lines: string[];
+}
 
 export function prepareMarkdownForTranslation(
   markdown: string,
   settings: TranslationSettings,
 ): PreparedMarkdown {
   const extracted = extractBlocks(markdown, settings);
-  const translationBlocks = settings.skipFrontMatter
+  const filteredBlocks = settings.skipFrontMatter
     ? stripLeadingFrontMatter(extracted.blocks)
     : extracted.blocks;
-  const translationMarkdown = translationBlocks.join("\n\n").trim();
-  const cleanedMarkdown = restorePreservedMarkdown(
-    translationMarkdown,
-    extracted.preservedBlocks,
+  const frontMatterBlocksRemoved = Math.max(
+    0,
+    extracted.blocks.length - filteredBlocks.length,
   );
+  const cleanedMarkdown = filteredBlocks.join("\n\n").trim();
 
   return {
     cleanedMarkdown,
-    translationMarkdown,
-    chunks: countTranslatableBlocks(translationBlocks)
-      ? chunkBlocks(translationBlocks, settings.chunkChars)
-      : [],
-    preservedBlocks: extracted.preservedBlocks,
+    chunks: cleanedMarkdown ? chunkBlocks(filteredBlocks, settings.chunkChars) : [],
+    stats: {
+      ...extracted.stats,
+      frontMatterBlocksRemoved,
+      keptBlocks: filteredBlocks.length,
+    },
   };
 }
 
-export function restorePreservedMarkdown(
+function extractBlocks(
   markdown: string,
-  preservedBlocks: PreservedBlock[],
-) {
-  let restored = markdown;
-  for (const block of preservedBlocks) {
-    restored = restored.split(block.token).join(block.content);
-  }
-  return restored;
-}
-
-function extractBlocks(markdown: string, settings: TranslationSettings) {
-  const normalized = markdown.replace(/\r\n/g, "\n");
-  const lines = normalized.split("\n");
+  settings: TranslationSettings,
+): ExtractedBlocks {
+  const lines = normalizeLineEndings(markdown).split("\n");
   const blocks: string[] = [];
-  const preservedBlocks: PreservedBlock[] = [];
-  const current: string[] = [];
-  const preservedCurrent: string[] = [];
-  let translatableBlockCount = 0;
-  let inFence = false;
-  let htmlPreserveTag: "table" | "figure" | null = null;
-  let preserveTail = false;
-
-  const flushCurrent = () => {
-    const block = current.join("\n").trim();
-    current.length = 0;
-    if (block) {
-      blocks.push(block);
-      translatableBlockCount += 1;
-    }
+  const currentTextBlock: string[] = [];
+  const stats = {
+    imagesRemoved: 0,
+    tablesRemoved: 0,
+    algorithmsRemoved: 0,
+    detailsRemoved: 0,
+    referencesRemoved: false,
   };
 
-  const flushPreserved = () => {
-    const block = preservedCurrent.join("\n").trim();
-    preservedCurrent.length = 0;
+  let activeHtmlBlock: HtmlCaptureBlock | null = null;
+  let activeFence:
+    | {
+        marker: string;
+        lines: string[];
+      }
+    | null = null;
+  let activeMarkdownTable: string[] = [];
+  let droppingTail = false;
+
+  const finalizeTextBlock = () => {
+    const block = currentTextBlock.join("\n").trim();
+    currentTextBlock.length = 0;
     if (!block) {
       return;
     }
 
-    const token = `${PRESERVE_TOKEN_PREFIX}${String(
-      preservedBlocks.length + 1,
-    ).padStart(4, "0")}${PRESERVE_TOKEN_SUFFIX}`;
-    preservedBlocks.push({ token, content: block });
-    blocks.push(token);
+    const dropReason = getDroppedTextBlockReason(block, settings);
+    if (dropReason === "image") {
+      stats.imagesRemoved += 1;
+      return;
+    }
+    if (dropReason === "table") {
+      stats.tablesRemoved += 1;
+      return;
+    }
+    if (dropReason === "algorithm") {
+      stats.algorithmsRemoved += 1;
+      return;
+    }
+    if (dropReason === "details") {
+      stats.detailsRemoved += 1;
+      return;
+    }
+
+    blocks.push(block);
+  };
+
+  const flushMarkdownTable = () => {
+    if (!activeMarkdownTable.length) {
+      return;
+    }
+    stats.tablesRemoved += 1;
+    activeMarkdownTable = [];
+  };
+
+  const appendSanitizedText = (line: string) => {
+    const sanitized = sanitizeInlineArtifacts(line, settings).trimEnd();
+    if (!sanitized.trim()) {
+      return;
+    }
+    currentTextBlock.push(sanitized);
   };
 
   for (const rawLine of lines) {
     const line = rawLine.trimEnd();
 
-    if (preserveTail) {
-      flushCurrent();
-      preservedCurrent.push(line);
+    if (droppingTail) {
       continue;
     }
 
-    if (htmlPreserveTag) {
-      flushCurrent();
-      preservedCurrent.push(line);
-      if (new RegExp(`</${htmlPreserveTag}\\b`, "i").test(line)) {
-        htmlPreserveTag = null;
-        flushPreserved();
+    if (activeFence) {
+      activeFence.lines.push(line);
+      if (isFenceClosingLine(line, activeFence.marker)) {
+        const fencedBlock = activeFence.lines.join("\n");
+        const dropReason = getDroppedFenceReason(fencedBlock, settings);
+        if (dropReason === "table") {
+          stats.tablesRemoved += 1;
+        } else if (dropReason === "algorithm") {
+          stats.algorithmsRemoved += 1;
+        } else {
+          blocks.push(fencedBlock.trim());
+        }
+        activeFence = null;
       }
       continue;
     }
 
-    if (settings.skipTables && /^```/.test(line)) {
-      flushCurrent();
-      preservedCurrent.push(line);
-      inFence = !inFence;
-      if (!inFence) {
-        flushPreserved();
+    if (activeHtmlBlock) {
+      activeHtmlBlock.lines.push(line);
+      if (new RegExp(`</${activeHtmlBlock.tag}\\b`, "i").test(line)) {
+        countDroppedHtmlBlock(activeHtmlBlock, stats);
+        activeHtmlBlock = null;
       }
       continue;
     }
 
-    if (inFence && settings.skipTables) {
-      preservedCurrent.push(line);
+    if (activeMarkdownTable.length) {
+      if (isMarkdownTableLine(line)) {
+        activeMarkdownTable.push(line);
+        continue;
+      }
+      flushMarkdownTable();
+    }
+
+    if (settings.skipReferences && shouldDropTailFromHeading(line)) {
+      finalizeTextBlock();
+      stats.referencesRemoved = true;
+      droppingTail = true;
       continue;
     }
 
-    if (settings.skipReferences && shouldPreserveTailFromHeading(line)) {
-      flushCurrent();
-      flushPreserved();
-      preservedCurrent.push(line);
-      preserveTail = true;
+    const fenceMarker = getFenceMarker(line);
+    if (fenceMarker) {
+      finalizeTextBlock();
+      activeFence = {
+        marker: fenceMarker,
+        lines: [line],
+      };
       continue;
     }
 
-    const openedTag = getOpenedHtmlPreserveTag(line, settings);
-    if (openedTag) {
-      flushCurrent();
-      preservedCurrent.push(line);
-      if (new RegExp(`</${openedTag}\\b`, "i").test(line)) {
-        flushPreserved();
+    const htmlSkipTag = getOpenedHtmlSkipTag(line, settings);
+    if (htmlSkipTag) {
+      finalizeTextBlock();
+      const block = {
+        tag: htmlSkipTag,
+        lines: [line],
+      } satisfies HtmlCaptureBlock;
+
+      if (new RegExp(`</${htmlSkipTag}\\b`, "i").test(line)) {
+        countDroppedHtmlBlock(block, stats);
       } else {
-        htmlPreserveTag = openedTag;
+        activeHtmlBlock = block;
       }
       continue;
     }
 
-    if (shouldPreserveLine(line, settings)) {
-      flushCurrent();
-      preservedCurrent.push(line);
+    if (isDetailsControlLine(line, settings)) {
+      finalizeTextBlock();
+      stats.detailsRemoved += 1;
+      continue;
+    }
+
+    if (settings.skipTables && isMarkdownTableLine(line)) {
+      finalizeTextBlock();
+      activeMarkdownTable.push(line);
+      continue;
+    }
+
+    if (settings.skipImages && isStandaloneImageLine(line)) {
+      finalizeTextBlock();
+      stats.imagesRemoved += 1;
       continue;
     }
 
     if (!line.trim()) {
-      flushCurrent();
-      flushPreserved();
+      finalizeTextBlock();
       continue;
     }
 
-    flushPreserved();
-    current.push(line);
+    appendSanitizedText(line);
   }
 
-  flushCurrent();
-  flushPreserved();
+  finalizeTextBlock();
+  flushMarkdownTable();
+
+  if (activeFence) {
+    const fencedBlock = activeFence.lines.join("\n");
+    const dropReason = getDroppedFenceReason(fencedBlock, settings);
+    if (dropReason === "table") {
+      stats.tablesRemoved += 1;
+    } else if (dropReason === "algorithm") {
+      stats.algorithmsRemoved += 1;
+    } else if (fencedBlock.trim()) {
+      blocks.push(fencedBlock.trim());
+    }
+  }
+
+  if (activeHtmlBlock) {
+    countDroppedHtmlBlock(activeHtmlBlock, stats);
+  }
 
   return {
     blocks,
-    preservedBlocks,
-    translatableBlockCount,
+    stats,
   };
 }
 
-function shouldPreserveLine(line: string, settings: TranslationSettings) {
-  if (settings.skipImages && /^!\[.*\]\(.*\)$/.test(line)) {
-    return true;
-  }
-
-  if (settings.skipTables) {
-    if (/^\|.+\|$/.test(line)) return true;
-    if (/^[:|\-\s]+$/.test(line)) return true;
-  }
-
-  if (settings.skipImages && /<\/?(img|figcaption)\b/i.test(line)) {
-    return true;
-  }
-
-  return false;
+function normalizeLineEndings(markdown: string) {
+  return markdown.replace(/\r\n/g, "\n");
 }
 
-function getOpenedHtmlPreserveTag(
+function sanitizeInlineArtifacts(
   line: string,
   settings: TranslationSettings,
-): "table" | "figure" | null {
+) {
+  let sanitized = line;
+
+  if (settings.skipImages) {
+    sanitized = sanitized
+      .replace(/!\[[^\]]*]\([^)]*\)/g, "")
+      .replace(/<img\b[^>]*\/?>/gi, "")
+      .replace(/<\/?figcaption\b[^>]*>/gi, "");
+  }
+
+  if (settings.skipAlgorithms) {
+    sanitized = sanitized
+      .replace(/<\/?details\b[^>]*>/gi, "")
+      .replace(/<\/?summary\b[^>]*>/gi, "");
+  }
+
+  return sanitized;
+}
+
+function isStandaloneImageLine(line: string) {
+  const trimmed = line.trim();
+  return (
+    /^!\[[^\]]*]\([^)]*\)$/.test(trimmed) ||
+    /^<\/?(?:img|figcaption)\b[^>]*>$/i.test(trimmed)
+  );
+}
+
+function isDetailsControlLine(
+  line: string,
+  settings: TranslationSettings,
+) {
+  if (!settings.skipAlgorithms) {
+    return false;
+  }
+
+  const trimmed = line.trim();
+  return (
+    /^<\/?details\b[^>]*>$/i.test(trimmed) ||
+    /^<summary\b[^>]*>.*<\/summary>$/i.test(trimmed)
+  );
+}
+
+function getOpenedHtmlSkipTag(
+  line: string,
+  settings: TranslationSettings,
+): HtmlCaptureBlock["tag"] | null {
   if (settings.skipTables && /<table\b/i.test(line)) {
     return "table";
   }
   if (settings.skipImages && /<figure\b/i.test(line)) {
     return "figure";
   }
+  if (settings.skipAlgorithms && /<details\b/i.test(line)) {
+    return "details";
+  }
   return null;
 }
 
-function shouldPreserveTailFromHeading(line: string) {
+function getFenceMarker(line: string) {
+  const match = line.trim().match(/^(```+|~~~+)/);
+  return match?.[1] || "";
+}
+
+function isFenceClosingLine(line: string, marker: string) {
+  return line.trim().startsWith(marker);
+}
+
+function getDroppedFenceReason(
+  block: string,
+  settings: TranslationSettings,
+): "table" | "algorithm" | null {
+  if (settings.skipTables && isTableLikeFenceBlock(block)) {
+    return "table";
+  }
+  if (settings.skipAlgorithms && isAlgorithmLikeBlock(block)) {
+    return "algorithm";
+  }
+  return null;
+}
+
+function isTableLikeFenceBlock(block: string) {
+  const lines = block.split("\n");
+  const header = lines[0]?.trim().toLowerCase() || "";
+  const body = lines.slice(1, -1);
+
+  if (
+    /(table|csv|tsv|html)$/.test(header) ||
+    body.some((line) => /<table\b/i.test(line))
+  ) {
+    return true;
+  }
+
+  const tableLikeLineCount = body.filter((line) => isMarkdownTableLine(line)).length;
+  return tableLikeLineCount >= 2;
+}
+
+function isMarkdownTableLine(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  return /^\|.*\|$/.test(trimmed) || /^[|:\-\s]+$/.test(trimmed);
+}
+
+function getDroppedTextBlockReason(
+  block: string,
+  settings: TranslationSettings,
+): "image" | "table" | "algorithm" | "details" | null {
+  const firstLine = block.split("\n").map((line) => line.trim()).find(Boolean) || "";
+
+  if (
+    settings.skipAlgorithms &&
+    (isDetailsLikeBlock(block) || isAlgorithmLikeBlock(block))
+  ) {
+    return isDetailsLikeBlock(block) ? "details" : "algorithm";
+  }
+
+  if (settings.skipImages && isFigureCaptionBlock(firstLine)) {
+    return "image";
+  }
+
+  if (settings.skipTables && isTableCaptionBlock(firstLine)) {
+    return "table";
+  }
+
+  return null;
+}
+
+function isFigureCaptionBlock(firstLine: string) {
+  return FIGURE_CAPTION_PATTERNS.some((pattern) => pattern.test(firstLine));
+}
+
+function isTableCaptionBlock(firstLine: string) {
+  return TABLE_CAPTION_PATTERNS.some((pattern) => pattern.test(firstLine));
+}
+
+function isDetailsLikeBlock(block: string) {
+  if (/<\/?details\b/i.test(block) || /<\/?summary\b/i.test(block)) {
+    return true;
+  }
+
+  return DETAILS_SUMMARY_HINT_PATTERNS.some((pattern) => pattern.test(block));
+}
+
+function isAlgorithmLikeBlock(block: string) {
+  const lines = block
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!lines.length) {
+    return false;
+  }
+
+  const firstLine = lines[0];
+  const stepLineCount = lines.filter((line) =>
+    /^(?:\d+[:：.]|\d+\s)/.test(line),
+  ).length;
+  const directiveLineCount = lines.filter((line) =>
+    ALGORITHM_DIRECTIVE_PATTERNS.some((pattern) => pattern.test(line)),
+  ).length;
+  const mathDenseLineCount = lines.filter((line) =>
+    /(?:\\mathbb|\\in|\\times|\\text|[_^{}$]|←|:=)/.test(line),
+  ).length;
+
+  if (ALGORITHM_TITLE_PATTERNS.some((pattern) => pattern.test(firstLine))) {
+    return true;
+  }
+
+  return (
+    directiveLineCount >= 2 &&
+    stepLineCount >= 3 &&
+    mathDenseLineCount >= 2
+  );
+}
+
+function countDroppedHtmlBlock(
+  block: HtmlCaptureBlock,
+  stats: ExtractedBlocks["stats"],
+) {
+  if (block.tag === "table") {
+    stats.tablesRemoved += 1;
+    return;
+  }
+
+  if (block.tag === "figure") {
+    stats.imagesRemoved += 1;
+    return;
+  }
+
+  stats.detailsRemoved += 1;
+}
+
+function shouldDropTailFromHeading(line: string) {
   const heading = line.replace(/^#+\s*/, "").trim();
-  return TAIL_PRESERVE_HEADING_PATTERNS.some((pattern) => pattern.test(heading));
+  return REFERENCE_HEADING_PATTERNS.some((pattern) => pattern.test(heading));
 }
 
 function chunkBlocks(blocks: string[], maxChars: number) {
@@ -254,10 +526,6 @@ function stripLeadingFrontMatter(blocks: string[]) {
 }
 
 function isMainContentStart(block: string) {
-  if (!block || isPreservedToken(block)) {
-    return false;
-  }
-
   const firstLine = block
     .split("\n")
     .map((line) => line.trim())
@@ -268,15 +536,4 @@ function isMainContentStart(block: string) {
 
   const normalized = firstLine.replace(/^#+\s*/, "").trim();
   return MAIN_CONTENT_HEADINGS.some((pattern) => pattern.test(normalized));
-}
-
-function countTranslatableBlocks(blocks: string[]) {
-  return blocks.filter((block) => !isPreservedToken(block)).length;
-}
-
-function isPreservedToken(block: string) {
-  return (
-    block.startsWith(PRESERVE_TOKEN_PREFIX) &&
-    block.endsWith(PRESERVE_TOKEN_SUFFIX)
-  );
 }
