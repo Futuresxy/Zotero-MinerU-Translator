@@ -20,6 +20,8 @@ pref("translationSystemPrompt", "你是一名专业的计算机体系结构、�
 pref("translationTemperature", "0.1");
 pref("translationChunkChars", 7000);
 pref("translationConcurrency", 2);
+pref("queueExtractConcurrency", 2);
+pref("queueTranslateConcurrency", 1);
 pref("skipImages", true);
 pref("skipTables", true);
 pref("skipAlgorithms", true);

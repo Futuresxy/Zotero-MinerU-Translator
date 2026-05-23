@@ -158,6 +158,13 @@
       color: #5f6d6b;
       font-size: 11px;
     }
+
+    .mds-inline-help {
+      margin: -4px 0 4px 190px;
+      font-size: 11px;
+      line-height: 1.65;
+      color: #5f6d6b;
+    }
   </html:style>
 
   <html:div class="mds-shell">
@@ -389,6 +396,29 @@
           preference="translationConcurrency"
         ></html:input>
       </hbox>
+      <hbox class="mds-field">
+        <html:label
+          for="zotero-prefpane-__addonRef__-queueExtractConcurrency"
+          data-l10n-id="pref-queue-extract-concurrency"
+        ></html:label>
+        <html:input
+          type="number"
+          id="zotero-prefpane-__addonRef__-queueExtractConcurrency"
+          preference="queueExtractConcurrency"
+        ></html:input>
+      </hbox>
+      <hbox class="mds-field">
+        <html:label
+          for="zotero-prefpane-__addonRef__-queueTranslateConcurrency"
+          data-l10n-id="pref-queue-translate-concurrency"
+        ></html:label>
+        <html:input
+          type="number"
+          id="zotero-prefpane-__addonRef__-queueTranslateConcurrency"
+          preference="queueTranslateConcurrency"
+        ></html:input>
+      </hbox>
+      <html:p class="mds-inline-help" data-l10n-id="pref-concurrency-help"></html:p>
       <hbox class="mds-field">
         <html:label
           for="zotero-prefpane-__addonRef__-translationSystemPrompt"

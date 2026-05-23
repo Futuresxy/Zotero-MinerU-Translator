@@ -1,7 +1,11 @@
-import { getString, initLocale } from "./utils/locale";
+import { initLocale } from "./utils/locale";
 import { registerContextMenu } from "./modules/contextMenu";
 import { registerPreferencePane } from "./modules/preferences";
 import { registerPrefsScripts } from "./modules/preferenceScript";
+import {
+  cancelTranslationWorkflow,
+  showTranslationQueueWindow,
+} from "./modules/workflow";
 import { createZToolkit } from "./utils/ztoolkit";
 
 let uiRegistered = false;
@@ -28,27 +32,23 @@ async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
     `${addon.data.config.addonRef}-mainWindow.ftl`,
   );
 
+  registerToolbarButton(win);
+
   if (!uiRegistered) {
     registerContextMenu();
     uiRegistered = true;
   }
-
-  new ztoolkit.ProgressWindow(addon.data.config.addonName)
-    .createLine({
-      text: getString("startup-finish"),
-      type: "success",
-      progress: 100,
-    })
-    .show();
 }
 
 async function onMainWindowUnload(win: Window): Promise<void> {
   void win;
+  cancelTranslationWorkflow();
   ztoolkit.unregisterAll();
   addon.data.dialog?.window?.close();
 }
 
 function onShutdown(): void {
+  cancelTranslationWorkflow();
   ztoolkit.unregisterAll();
   addon.data.dialog?.window?.close();
   addon.data.alive = false;
@@ -92,3 +92,55 @@ export default {
   onShortcuts,
   onDialogEvents,
 };
+
+function registerToolbarButton(win: _ZoteroTypes.MainWindow) {
+  const doc = win.document;
+  const buttonID = `${addon.data.config.addonRef}-toolbar-button`;
+  if (doc.getElementById(buttonID)) {
+    return;
+  }
+
+  const toolbar =
+    doc.getElementById("zotero-toolbar") ||
+    doc.querySelector("toolbar");
+  if (!toolbar) {
+    return;
+  }
+
+  const button = ztoolkit.UI.createElement(doc, "toolbarbutton", {
+    id: buttonID,
+    namespace: "xul",
+    attributes: {
+      class: "toolbarbutton-1",
+      tooltiptext: getToolbarTooltip(),
+      removable: "false",
+    },
+    styles: {
+      listStyleImage: `url(chrome://${addon.data.config.addonRef}/content/icons/favicon.png)`,
+      padding: "4px",
+      marginInline: "4px",
+    },
+    listeners: [
+      {
+        type: "command",
+        listener: () => {
+          showTranslationQueueWindow();
+        },
+      },
+    ],
+  });
+
+  const syncButton = doc.getElementById("zotero-tb-sync");
+  if (syncButton?.parentNode) {
+    syncButton.parentNode.insertBefore(button, syncButton);
+    return;
+  }
+
+  toolbar.appendChild(button);
+}
+
+function getToolbarTooltip() {
+  return /^zh/i.test(Zotero.locale || "")
+    ? "打开 MineruDS 翻译队列面板"
+    : "Open MineruDS translation queue";
+}

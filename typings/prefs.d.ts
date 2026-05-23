@@ -29,6 +29,8 @@ declare namespace _ZoteroTypes {
       "translationTemperature": string;
       "translationChunkChars": number;
       "translationConcurrency": number;
+      "queueExtractConcurrency": number;
+      "queueTranslateConcurrency": number;
       "skipImages": boolean;
       "skipTables": boolean;
       "skipAlgorithms": boolean;

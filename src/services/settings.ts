@@ -45,6 +45,10 @@ export interface WorkflowSettings {
   enabled: boolean;
   mineru: MinerUSettings;
   translation: TranslationSettings;
+  queue: {
+    extractConcurrency: number;
+    translateConcurrency: number;
+  };
 }
 
 const PROVIDER_BASE_URLS: Record<TranslationProvider, string> = {
@@ -107,6 +111,14 @@ export function getWorkflowSettings(): WorkflowSettings {
       noteHeading: getPref("noteHeading").trim() || "PDF 翻译",
       includeOriginalMarkdown: getPref("includeOriginalMarkdown"),
     },
+    queue: {
+      extractConcurrency: clampQueueConcurrency(
+        Number(getPref("queueExtractConcurrency")) || 1,
+      ),
+      translateConcurrency: clampQueueConcurrency(
+        Number(getPref("queueTranslateConcurrency")) || 1,
+      ),
+    },
   };
 }
 
@@ -151,4 +163,11 @@ function clampConcurrency(value: number) {
     return 2;
   }
   return Math.max(1, Math.min(8, Math.floor(value)));
+}
+
+function clampQueueConcurrency(value: number) {
+  if (!Number.isFinite(value)) {
+    return 1;
+  }
+  return Math.max(1, Math.min(4, Math.floor(value)));
 }

@@ -1,5 +1,5 @@
 startup-finish = MineruDS Translator is ready
-menuitem-label = Translate PDF and Save to Note
+menuitem-label = Add PDF to Translation Queue
 prefs-title = MineruDS Translator
 menu-progress-start = Starting PDF translation workflow
 menu-progress-mineru = Parsing PDFs with MinerU

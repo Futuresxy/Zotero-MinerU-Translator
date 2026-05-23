@@ -1,5 +1,5 @@
 startup-finish = MineruDS Translator 已就绪
-menuitem-label = 翻译 PDF 并写入笔记
+menuitem-label = 加入 PDF 翻译队列
 prefs-title = MineruDS Translator
 menu-progress-start = 开始执行 PDF 翻译流程
 menu-progress-mineru = 正在使用 MinerU 解析 PDF
