@@ -27,7 +27,8 @@ interface UpdateTranslationNoteParams extends TranslationNoteBaseParams {
 export async function createOrReuseTranslationNote(
   params: CreateTranslationNoteParams,
 ) {
-  const translationNote = (await findExistingTranslationNote(params.target)) ||
+  const translationNote =
+    (await findExistingTranslationNote(params.target)) ||
     createChildNote(params.target);
   translationNote.setNote(
     renderTranslationNoteHtml({
@@ -65,38 +66,9 @@ async function findExistingTranslationNote(target: PdfTarget) {
 }
 
 function renderTranslationNoteHtml(params: UpdateTranslationNoteParams) {
-  const metadataRows = [
-    ["来源 PDF", params.target.fileName],
-    ["所属条目", params.target.displayTitle],
-    ["翻译提供方", params.providerLabel],
-    ["模型", params.modelLabel],
-    ["目标语言", params.targetLanguage],
-    ["状态", renderStatusLabel(params.status)],
-    ["分段进度", `${params.completedChunks}/${params.totalChunks}`],
-    ["跳过图片", String(params.filterStats.imagesRemoved)],
-    ["跳过表格", String(params.filterStats.tablesRemoved)],
-    ["跳过算法/伪代码", String(params.filterStats.algorithmsRemoved)],
-    ["跳过 details/包装块", String(params.filterStats.detailsRemoved)],
-    [
-      "跳过参考文献",
-      params.filterStats.referencesRemoved ? "是" : "否",
-    ],
-    [
-      "跳过前置信息区块",
-      String(params.filterStats.frontMatterBlocksRemoved),
-    ],
-    ["生成时间", new Date().toLocaleString()],
-  ]
-    .map(
-      ([label, value]) =>
-        `<p><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}</p>`,
-    )
-    .join("");
-
   const sections = [
     `<!-- ${escapeHtml(getAttachmentMarker(params.target))} -->`,
     `<h1>${escapeHtml(`${params.heading}｜${params.target.displayTitle}`)}</h1>`,
-    metadataRows,
   ];
 
   if (params.errorMessage) {
@@ -133,14 +105,6 @@ function createChildNote(target: PdfTarget) {
 
 function getAttachmentMarker(target: PdfTarget) {
   return `ZPT_TRANSLATION_NOTE attachment-id=${target.attachment.id}`;
-}
-
-function renderStatusLabel(status: UpdateTranslationNoteParams["status"]) {
-  if (status === "pending") return "待处理";
-  if (status === "translating") return "翻译中";
-  if (status === "partial") return "部分完成";
-  if (status === "completed") return "已完成";
-  return "失败";
 }
 
 function renderMarkdownAsHtml(markdown: string) {
@@ -204,9 +168,8 @@ function renderInlineMarkdown(value: string) {
   const placeholders: string[] = [];
   let escaped = escapeHtml(value);
 
-  escaped = escaped.replace(
-    /`([^`]+)`/g,
-    (_, text: string) => storePlaceholder(placeholders, `<code>${text}</code>`),
+  escaped = escaped.replace(/`([^`]+)`/g, (_, text: string) =>
+    storePlaceholder(placeholders, `<code>${text}</code>`),
   );
   escaped = escaped.replace(
     /\[([^\]]+)]\((https?:\/\/[^)\s]+)\)/g,
@@ -216,13 +179,11 @@ function renderInlineMarkdown(value: string) {
         `<a href="${escapeHtml(url)}">${escapeHtml(text)}</a>`,
       ),
   );
-  escaped = escaped.replace(
-    /\*\*([^*]+)\*\*/g,
-    (_, text: string) => storePlaceholder(placeholders, `<strong>${text}</strong>`),
+  escaped = escaped.replace(/\*\*([^*]+)\*\*/g, (_, text: string) =>
+    storePlaceholder(placeholders, `<strong>${text}</strong>`),
   );
-  escaped = escaped.replace(
-    /__([^_]+)__/g,
-    (_, text: string) => storePlaceholder(placeholders, `<strong>${text}</strong>`),
+  escaped = escaped.replace(/__([^_]+)__/g, (_, text: string) =>
+    storePlaceholder(placeholders, `<strong>${text}</strong>`),
   );
   escaped = escaped.replace(
     /(^|[\s(])\*([^*]+)\*(?=[\s).,;:!?]|$)/g,
