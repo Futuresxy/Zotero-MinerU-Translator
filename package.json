@@ -1,7 +1,7 @@
 {
   "name": "mineruds-translator",
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Zotero 7 plugin for extracting PDF papers with MinerU and saving chunked LLM translations to Zotero notes.",
   "config": {
     "addonName": "MineruDS Translator",

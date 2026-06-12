@@ -38,6 +38,8 @@ export async function convertPdfsToMarkdown(
     return new Map<string, string>();
   }
 
+  ensureMinerUDirectConnection(settings.baseURL);
+
   const createResponse = await fetchJSON<MinerUBatchCreateResponse>(
     `${settings.baseURL}/file-urls/batch`,
     {
@@ -71,6 +73,7 @@ export async function convertPdfsToMarkdown(
   for (let index = 0; index < targets.length; index++) {
     const binary = await readFileBytes(targets[index].filePath);
     const uploadURL = createResponse.data.file_urls[index];
+    ensureMinerUDirectConnection(uploadURL);
     try {
       await putBinary(uploadURL, binary);
     } catch (error) {
@@ -103,7 +106,8 @@ export async function convertPdfsToMarkdown(
     let hasFailure = false;
 
     for (const item of extractResults) {
-      const dataID = item.data_id || findDataIDByFileName(item.file_name, targets);
+      const dataID =
+        item.data_id || findDataIDByFileName(item.file_name, targets);
       if (!dataID || markdownMap.has(dataID)) {
         continue;
       }
@@ -116,6 +120,7 @@ export async function convertPdfsToMarkdown(
       }
 
       if (item.state === "done" && item.full_zip_url) {
+        ensureMinerUDirectConnection(item.full_zip_url);
         markdownMap.set(dataID, await downloadFullMarkdown(item.full_zip_url));
       }
     }
@@ -146,7 +151,10 @@ function createAuthorizedHeaders(token: string) {
   };
 }
 
-function findDataIDByFileName(fileName: string | undefined, targets: PdfTarget[]) {
+function findDataIDByFileName(
+  fileName: string | undefined,
+  targets: PdfTarget[],
+) {
   return targets.find((target) => target.fileName === fileName)?.dataID;
 }
 
@@ -175,4 +183,116 @@ function getHostLabel(url: string) {
   } catch {
     return "unknown host";
   }
+}
+
+const MINERU_DIRECT_DOMAINS = [
+  "mineru.net",
+  "openxlab.org.cn",
+  "cdn-mineru.openxlab.org.cn",
+];
+
+const minerUDirectHosts = new Set(MINERU_DIRECT_DOMAINS);
+let minerUProxyBypassRegistered = false;
+let minerUProxyFilter: unknown = null;
+
+function ensureMinerUDirectConnection(url: string) {
+  addDirectHostFromURL(url);
+  registerMinerUProxyBypass();
+  appendMinerUNoProxyPreference();
+}
+
+function addDirectHostFromURL(url: string) {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    if (host) {
+      minerUDirectHosts.add(host);
+    }
+  } catch {
+    // Ignore non-URL values; known MinerU domains are still covered.
+  }
+}
+
+function registerMinerUProxyBypass() {
+  if (minerUProxyBypassRegistered) {
+    return;
+  }
+
+  try {
+    const components = (globalThis as any).Components;
+    const proxyService = components.classes[
+      "@mozilla.org/network/protocol-proxy-service;1"
+    ].getService(components.interfaces.nsIProtocolProxyService);
+
+    minerUProxyFilter = {
+      applyFilter(
+        _proxyService: unknown,
+        uri: { asciiHost?: string; host?: string },
+        proxyInfo: unknown,
+      ) {
+        const host = (uri.asciiHost || uri.host || "").toLowerCase();
+        return isMinerUDirectHost(host) ? null : proxyInfo;
+      },
+    };
+
+    proxyService.registerFilter(minerUProxyFilter, 0);
+    minerUProxyBypassRegistered = true;
+  } catch (error) {
+    Zotero.debug(
+      `MinerU proxy bypass filter unavailable: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
+function appendMinerUNoProxyPreference() {
+  try {
+    const services = (globalThis as any).Services;
+    const prefs = services?.prefs;
+    if (!prefs?.getCharPref || !prefs?.setCharPref) {
+      return;
+    }
+
+    const prefName = "network.proxy.no_proxies_on";
+    const current = prefs.getCharPref(prefName, "");
+    const entries = current
+      .split(",")
+      .map((entry: string) => entry.trim())
+      .filter(Boolean);
+    const normalized = new Set(
+      entries.map((entry: string) => entry.toLowerCase()),
+    );
+    let changed = false;
+
+    for (const host of minerUDirectHosts) {
+      if (!normalized.has(host)) {
+        entries.push(host);
+        normalized.add(host);
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      prefs.setCharPref(prefName, entries.join(", "));
+    }
+  } catch (error) {
+    Zotero.debug(
+      `MinerU proxy exclusion update failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
+function isMinerUDirectHost(host: string) {
+  if (!host) {
+    return false;
+  }
+
+  for (const directHost of minerUDirectHosts) {
+    if (host === directHost || host.endsWith(`.${directHost}`)) {
+      return true;
+    }
+  }
+  return false;
 }
